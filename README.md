@@ -8,6 +8,10 @@
 - `supabase/functions/admin-users` — 거래처·관리자 아이디 발급, 비밀번호 재설정, 잠금
 - `supabase/functions/tax-invoice` — 볼타 API로 전자세금계산서 발행·상태 확인·PDF
 
+## 글꼴
+- 제목·워드마크·큰 숫자: 페이퍼로지(Paperlogy, PT&, SIL OFL 1.1) — `assets/fonts`에 웹용(woff2)으로 변환해 둠. 글꼴 안에 저작권·라이선스 표기 유지.
+- 본문: 프리텐다드(Pretendard, SIL OFL 1.1) — jsDelivr에서 불러옴.
+
 ## 보안
 - 이 저장소에는 공개용 키(publishable key)만 들어 있습니다. 데이터 접근은 Supabase 권한 규칙(RLS)으로 막혀 있어, 거래처는 자기 거래처의 주문·단가·세금계산서만 볼 수 있습니다.
 - 주문 단가는 서버에서 다시 계산하므로 화면에서 바꿀 수 없습니다.
