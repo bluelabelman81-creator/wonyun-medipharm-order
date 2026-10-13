@@ -825,6 +825,7 @@ const MODALS = {
           <div><span>업체</span><b>${esc(d.company || '-')}</b></div><div><span>구분</span><b>${esc(d.kind || '-')}</b></div>
           <div><span>주성분</span><b>${esc(d.ingr || '-')}</b></div><div><span>성분·함량</span><b>${esc(d.strength || '-')}</b></div>
           <div><span>보험코드</span><b class="mono">${esc((d.edi || []).join(', ') || '-')}</b></div><div><span>ATC 코드</span><b class="mono">${esc(d.atc || '-')}</b></div>
+          ${d.cls ? `<div><span>분류</span><b>${esc(d.cls)}</b></div>` : ''}${d.form ? `<div><span>제형</span><b>${esc(d.form)}</b></div>` : ''}
           <div><span>저장방법</span><b>${esc(d.storage || '-')}</b></div><div><span>유효기간</span><b>${esc(d.valid || '-')}</b></div>
         </div></div>
       ${p ? `<div class="note ${orderable(p) ? 'ok' : 'warn'}"><b>원윤메디팜 취급 품목</b>${esc(p.name)}${p.spec ? ' ' + esc(p.spec) : ''} · ${orderable(p) ? '지금 주문할 수 있어요' : '지금은 품절이에요'}</div>` : `<div class="note"><b>원윤메디팜에서 아직 취급하지 않는 약품이에요</b>${admin ? '상품으로 등록하면 거래처가 주문할 수 있어요.' : '보유 요청을 남기면 원윤메디팜이 확인해서 안내해 드려요.'}</div>`}
@@ -836,6 +837,7 @@ const MODALS = {
       ${sec('함께 주의할 약·음식', e.intrc)}
       ${sec('이상반응', e.se)}
       ${d.pack ? sec('포장단위', d.pack) : ''}
+      ${!d.efficacy && !e.efcy ? `<div class="note">효능·효과, 용법·용량, 주의사항은 아래 <b>의약품안전나라 원문</b>에서 볼 수 있어요.</div>` : ''}
       <p class="hint">출처: 식품의약품안전처 의약품 허가정보·e약은요·낱알식별 (공공데이터포털). 참고용 요약이에요. 최신 허가사항은 의약품안전나라 원문을 확인하세요.</p>`;
     const foot = `${d.link ? `<a class="btn ghost" href="${esc(d.link)}" target="_blank" rel="noopener">의약품안전나라 원문</a>` : ''}<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button>${drugAction(d, p, 'modal')}`;
     return frame(`${esc(d.name)} ${kindTag(d.kind)}`, '', body, foot);

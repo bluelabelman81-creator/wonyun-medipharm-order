@@ -3,7 +3,7 @@
 //   Supabase 비밀값이 없으면 app_secrets 표(서버만 읽음)의 같은 이름 값을 씀
 // 쓰는 API: 의약품 제품 허가정보(필수) · 의약품개요정보 e약은요(선택) · 의약품 낱알식별(선택)
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
-import { PRODUCT_EP, EASY_EP, PILL_EP, extractItems, merge, brief, mapProduct, normName, str, type DrugFull } from './lib.ts';
+import { PRODUCT_EP, EASY_EP, PILL_EP, extractItems, merge, brief, mapProduct, fromPill, normName, str, type DrugFull } from './lib.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 function secretKey(): string {
@@ -126,10 +126,12 @@ Deno.serve(async (req) => {
       const ck = 'm:' + (code || '') + ':' + name.toLowerCase();
       const { data: hit } = await db.from('drug_cache').select('data, fetched_at').eq('key', ck).maybeSingle();
       if (hit && Date.now() - new Date(hit.fetched_at).getTime() < ITEM_TTL) return json({ ...hit.data, cached: true });
-      const { items } = await call(key, PRODUCT_EP, { item_name: name, numOfRows: 20, pageNo: 1 });
-      const full = items.map(mapProduct).filter(d => d.seq && d.status === '정상');
       // 보험코드가 같으면 확실, 아니면 이름(괄호 속 성분 제외)이 똑같을 때만 — 함량이 다른 품목으로 잘못 잇지 않게
-      const hitd = (code && full.find(d => d.edi.includes(code.padStart(9, '0')))) || full.find(d => normName(d.name) === normName(name)) || null;
+      const pickHit = (full: DrugFull[]) => (code && full.find(d => d.edi.includes(code.padStart(9, '0')))) || full.find(d => normName(d.name) === normName(name)) || null;
+      let hitd: DrugFull | null = null;
+      try { const { items } = await call(key, PRODUCT_EP, { item_name: name, numOfRows: 20, pageNo: 1 }); hitd = pickHit(items.map(mapProduct).filter(d => d.seq && d.status === '정상')); }
+      catch (_) { /* 허가정보를 못 받으면 낱알식별로 */ }
+      if (!hitd) { try { const { items } = await call(key, PILL_EP, { item_name: name, numOfRows: 30, pageNo: 1 }); hitd = pickHit(items.map(fromPill).filter(d => d.seq)); } catch (_) { /* 없음 */ } }
       const out = { seq: hitd?.seq || null };
       await db.from('drug_cache').upsert({ key: ck, data: out, fetched_at: new Date().toISOString() });
       return json(out);
