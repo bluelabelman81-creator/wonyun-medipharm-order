@@ -241,10 +241,11 @@ function invoiceProblems(t) {
 }
 
 /* ---------- top-level views ---------- */
-const markImg = (size = 36) => `<img src="assets/mark-${size > 64 ? 192 : 64}.png" width="${size}" height="${size}" alt="">`;
-const brand = (sub) => `<div class="brand">${markImg(36)}<div><div class="wm">WONYUN MEDIPHARM</div><div class="wm-sub">${esc(sub || '원윤메디팜 · 의약품 주문')}</div></div></div>`;
-const gateLogo = () => `<div class="gate-logo">${markImg(76)}<div class="wm">WONYUN MEDIPHARM</div><div class="tagline">Pharmaceutical Wholesale</div></div>`;
-const gate = (body, wide) => `<div class="gate"><div class="gate-card${wide ? ' wide' : ''}">${gateLogo()}${body}</div></div>`;
+const MARK = '<svg viewBox="0 0 100 95.79" fill="currentColor" aria-hidden="true" focusable="false"><rect x="1.73" y="1.73" width="96.54" height="92.33" rx="6.97" fill="none" stroke="currentColor" stroke-width="3.46"/><path d="M45.09 22.36 L63.52 50.33 L63.52 73.81 L67.26 73.90 L67.54 50.05 L85.69 22.54 L81.01 22.64 L65.39 46.02 L49.49 22.45 Z M21.05 22.45 L20.95 73.43 L22.08 73.90 L39.01 52.67 L54.72 73.62 L59.49 73.90 L39.01 46.49 L24.60 63.61 L24.70 22.64 Z"/></svg>';
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z" stroke-linejoin="round"/></svg>';
+const markImg = (size = 36) => `<span class="mark" style="width:${size}px">${MARK}</span>`;
+const brand = (sub) => `<div class="brand">${markImg(34)}<div><div class="wm">WONYUN MEDIPHARM</div><div class="wm-sub">${esc(sub || '거래처 주문')}</div></div></div>`;
+const gate = (body) => `<div class="gate"><aside class="gate-brand"><div class="gate-motif" aria-hidden="true">${MARK}</div><div class="gate-id">${markImg(60)}<div class="wm">WONYUN MEDIPHARM</div><div class="tagline">Pharmaceutical Wholesale</div></div><p class="gate-note">약국·병의원 거래처 전용<br>의약품·의료소모품 주문</p></aside><main class="gate-main"><div class="gate-card">${body}</div></main></div>`;
 function view() {
   switch (S.phase) {
     case 'login': return loginView();
@@ -259,13 +260,13 @@ function view() {
 }
 function loginView() {
   const d = S.ui.lg;
-  return gate(`<h1>거래처 주문 로그인</h1>
+  return gate(`<h1>거래처 로그인</h1><p class="lead">원윤메디팜에서 받은 아이디로 들어오세요.</p>
     <form class="stack" style="gap:12px" data-form="login" novalidate>
       <label class="fld" for="lg-id"><span>아이디</span><input class="inp lg" id="lg-id" data-bind="lg.id" data-norender autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(d.id)}"></label>
       <label class="fld" for="lg-pw"><span>비밀번호</span><input class="inp lg" id="lg-pw" type="password" data-bind="lg.pw" data-norender autocomplete="current-password" value="${esc(d.pw)}"></label>
       <button class="btn primary lg block" type="submit"${S.busy ? ' disabled' : ''}>${S.busy ? '로그인하는 중…' : '로그인'}</button>
     </form>
-    <p class="gate-foot">아이디는 원윤메디팜에서 발급해 드려요. 비밀번호를 잊었다면 원윤메디팜에 재설정을 요청해 주세요.</p>`);
+    <p class="gate-foot">비밀번호를 잊었다면 원윤메디팜에 재설정을 요청해 주세요.</p>`);
 }
 function setupView() {
   const d = S.ui.su;
@@ -286,6 +287,7 @@ function tempPwView() {
       <button class="btn primary lg block" type="submit"${S.busy ? ' disabled' : ''}>${S.busy ? '바꾸는 중…' : '비밀번호 바꾸고 계속'}</button>
     </form><button class="btn ghost block" data-act="logout">로그아웃</button>`);
 }
+const meta = (...xs) => `<span class="meta">${xs.filter(Boolean).map(x => `<span>${x}</span>`).join('')}</span>`;
 const head = (title, sub = '', actions = '') => `<header class="ph"><div><h1>${title}</h1>${sub ? `<p class="ph-sub">${sub}</p>` : ''}</div>${actions ? `<div class="ph-act">${actions}</div>` : ''}</header>`;
 
 /* ---------- admin ---------- */
@@ -296,7 +298,7 @@ function adminView() {
   const counts = { orders: all.filter(o => o.status === '접수' || o.status === '확인').length, invoices: invWait };
   const v = NAV.some(n => n[0] === S.view) ? S.view : 'dash';
   const body = { dash: dashView, orders: ordersView, products: productsView, accounts: accountsView, invoices: invoicesView, settle: settleView, export: exportView, settings: settingsView }[v]();
-  return `<div class="shell"><aside class="side">${brand('원윤메디팜 · 관리자')}<nav class="nav" aria-label="관리 메뉴">${NAV.map(([k, l]) => `<button class="nav-i${v === k ? ' on' : ''}" data-act="go" data-v="${k}"${v === k ? ' aria-current="page"' : ''}>${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('')}</nav><div class="side-foot"><span><b>${esc(S.profile.name || S.profile.login_id)}</b> 관리자</span><button class="linkbtn" data-act="logout">로그아웃</button></div></aside><main class="main">${body}</main></div>`;
+  return `<div class="shell"><aside class="side">${brand('관리자')}<nav class="nav" aria-label="관리 메뉴">${NAV.map(([k, l]) => `<button class="nav-i${v === k ? ' on' : ''}" data-act="go" data-v="${k}"${v === k ? ' aria-current="page"' : ''}>${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('')}</nav><div class="side-foot"><span><b>${esc(S.profile.name || S.profile.login_id)}</b> 관리자</span><button class="linkbtn" data-act="logout">로그아웃</button></div></aside><main class="main">${body}</main></div>`;
 }
 
 function dashView() {
@@ -318,7 +320,7 @@ function dashView() {
     [S.tax?.hasKey && S.taxcfg?.issuer_id, '설정 → 세금계산서 연동에서 볼타 키, 발급자, 공동인증서를 등록해요.', 'settings']
   ];
   const setup = setupItems.some(x => !x[0]) ? `<section class="panel"><div class="panel-h"><h2>처음 시작할 때</h2><span class="muted">${setupItems.filter(x => x[0]).length}/${setupItems.length} 완료</span></div><ul class="list">${setupItems.map(([ok, t, v]) => `<li class="li${ok ? '' : ' click'}"${ok ? '' : ` data-act="go" data-v="${v}" role="button" tabindex="0"`}><span class="tag ${ok ? 'ok' : 'warn'}">${ok ? '완료' : '할 일'}</span><div class="li-main" style="white-space:normal">${t}</div></li>`).join('')}</ul></section>` : '';
-  return head('오늘의 주문 현황', `${fmtD(today())} 기준 · 상품 ${S.products.size}개 · 거래처 ${S.accounts.size}곳`, `<button class="btn primary" data-act="go" data-v="orders">주문 처리</button>`) + `
+  return head('오늘의 주문 현황', meta(`${fmtD(today())} 기준`, `상품 ${S.products.size}개`, `거래처 ${S.accounts.size}곳`), `<button class="btn primary" data-act="go" data-v="orders">주문 처리</button>`) + `
   <div class="stack">
     <div class="kpis">
       <button class="kpi${nNew.length ? ' alert' : ''}" data-act="goOrders" data-s="접수"><span class="k">확인 대기</span><span class="v">${nNew.length}<small>건</small></span><span class="s">거래처가 새로 넣은 주문</span></button>
@@ -331,7 +333,7 @@ function dashView() {
     <div class="dgrid">
       <div class="stack">
         <section class="panel"><div class="panel-h"><h2>지금 처리할 주문</h2><button class="btn sm ghost" data-act="go" data-v="orders">전체 보기</button></div>
-          ${queue.length ? `<ul class="list">${queue.map(o => `<li class="li click" data-act="openOrder" data-id="${esc(o.id)}" role="button" tabindex="0"><div class="li-main"><div class="li-t">${esc(o.cust_name)} <span class="muted mono">${esc(o.no)}</span></div><div class="li-s">${fmtDT(o.created_at)} · ${(o.lines || []).length}품목${o.want_date ? ` · 희망 ${fmtD(o.want_date)}` : ''}</div></div><span class="num">${won(o.total)}원</span>${pill(o.status)}</li>`).join('')}</ul>` : `<div class="empty"><b>밀린 주문이 없어요</b>거래처가 주문하면 여기에 먼저 보여요.</div>`}
+          ${queue.length ? `<ul class="list">${queue.map(o => `<li class="li click" data-act="openOrder" data-id="${esc(o.id)}" role="button" tabindex="0"><div class="li-main"><div class="li-t">${esc(o.cust_name)} <span class="muted mono">${esc(o.no)}</span></div><div class="li-s">${meta(fmtDT(o.created_at), `${(o.lines || []).length}품목`, o.want_date ? `희망 ${fmtD(o.want_date)}` : '')}</div></div><span class="num">${won(o.total)}원</span>${pill(o.status)}</li>`).join('')}</ul>` : `<div class="empty"><b>밀린 주문이 없어요</b>거래처가 주문하면 여기에 먼저 보여요.</div>`}
         </section>
         <section class="panel"><div class="panel-h"><h2>이번 달 일별 출고액</h2><span class="muted tabnum">${m.replace('-', '.')}</span></div><div class="panel-b">${monthChart()}</div></section>
       </div>
@@ -382,7 +384,7 @@ function productsView() {
   list.sort((a, b) => num(S.rx.get(b.id)?.qty) - num(S.rx.get(a.id)?.qty) || ko(a.name, b.name));
   const groups = [...new Set(products().map(p => p.grp).filter(Boolean))].sort(ko);
   const rxMonth = [...S.rx.values()][0]?.month;
-  return head('상품·재고', `${S.products.size}개 품목${rxMonth ? ` · 처방량은 ${rxMonth.replace('-', '년 ')}월 원외처방 통계 기준 (관리자만 보여요)` : ''}`, `<button class="btn" data-act="importXlsx">엑셀 올리기</button><button class="btn" data-act="exProducts">엑셀 내려받기</button><button class="btn primary" data-act="newProduct">상품 추가</button>`) + `
+  return head('상품·재고', meta(`${S.products.size}개 품목`, rxMonth ? `처방량은 ${rxMonth.replace('-', '년 ')}월 원외처방 통계 기준 (관리자만 보여요)` : ''), `<button class="btn" data-act="importXlsx">엑셀 올리기</button><button class="btn" data-act="exProducts">엑셀 내려받기</button><button class="btn primary" data-act="newProduct">상품 추가</button>`) + `
   <div class="stack">
     <div class="row">
       <div class="search"><label class="sr" for="pq">상품 검색</label><input class="inp" id="pq" data-bind="pq" value="${esc(S.ui.pq)}" placeholder="제품명·성분·보험코드 검색"></div>
@@ -518,7 +520,7 @@ function customerView() {
   const tabs = [['shop', '주문하기' + (cartCount(a.id) ? ` (${cartCount(a.id)})` : '')], ['history', '주문내역'], ['invoices', '세금계산서'], ['me', '내 정보']];
   const n = S.settings.notice || S.settings.cutoff;
   const body = v === 'history' ? historyView(ctx) : v === 'invoices' ? custInvoicesView() : v === 'me' ? meView() : shopView(ctx);
-  return `<div class="cshell"><header class="ctop"><div class="ctop-in">${brand('원윤메디팜 거래처 주문')}<nav class="ctabs">${tabs.map(([k, l]) => `<button class="${v === k ? 'on' : ''}" data-act="cview" data-v="${k}">${l}</button>`).join('')}</nav><div class="ctop-who"><span class="muted">거래처</span> <b>${esc(a.name)}</b>${num(a.discount) ? ` <span class="tag gold">할인 ${num(a.discount)}%</span>` : ''}<button class="btn sm ghost" data-act="logout">로그아웃</button></div></div></header>
+  return `<div class="cshell"><header class="ctop"><div class="ctop-in">${brand('거래처 주문')}<nav class="ctabs">${tabs.map(([k, l]) => `<button class="${v === k ? 'on' : ''}" data-act="cview" data-v="${k}">${l}</button>`).join('')}</nav><div class="ctop-who"><span class="muted">거래처</span> <b>${esc(a.name)}</b>${num(a.discount) ? ` <span class="tag gold">할인 ${num(a.discount)}%</span>` : ''}<button class="btn sm ghost" data-act="logout">로그아웃</button></div></div></header>
     <main class="cmain${v === 'shop' && cartCount(a.id) ? ' has-cartbar' : ''}">${n && v === 'shop' ? `<div class="banner">${S.settings.notice ? `<span><b>공지</b> ${esc(S.settings.notice)}</span>` : ''}${S.settings.cutoff ? `<span><b>마감</b> ${esc(S.settings.cutoff)}</span>` : ''}</div>` : ''}${body}</main></div>`;
 }
 function shopView(ctx) {
@@ -540,20 +542,20 @@ function shopView(ctx) {
   const last = myOrders[0];
   const rows = items.map(p => {
     const qv = cart.lines[p.id] || 0; const pr = priceFor(p, ctx); const step = Math.max(1, num(p.step) || 1);
-    return `<div class="prow${qv ? ' in' : ''}"><button class="fav${S.favs.has(p.id) ? ' on' : ''}" data-act="fav" data-id="${esc(p.id)}" aria-label="${esc(p.name)} 즐겨찾기" aria-pressed="${S.favs.has(p.id)}">${S.favs.has(p.id) ? '★' : '☆'}</button>
+    return `<div class="prow${qv ? ' in' : ''}"><button class="fav${S.favs.has(p.id) ? ' on' : ''}" data-act="fav" data-id="${esc(p.id)}" aria-label="${esc(p.name)} 즐겨찾기" aria-pressed="${S.favs.has(p.id)}">${STAR}</button>
       <div class="pinfo"><div class="pname">${esc(p.name)}</div><div class="pmeta">${p.spec ? `<span>${esc(p.spec)}</span>` : ''}${p.code ? `<span class="mono">${esc(p.code)}</span>` : ''}${p.grp ? `<span>${esc(p.grp)}</span>` : ''}${step > 1 ? `<span>${step}${esc(p.unit || '')} 단위</span>` : ''}</div></div>
       <div class="pprice"><span><b>${won(pr)}</b><span class="u">원/${esc(p.unit || '개')}</span></span>${pr !== num(p.price) ? `<s>${won(p.price)}원</s>` : ''}</div>
       <div class="pstock">${stockTag(p, true)}</div>
       <div class="qty"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="-${step}" aria-label="${esc(p.name)} 수량 빼기">−</button><input id="q-${esc(p.id)}" inputmode="numeric" autocomplete="off" data-cartqty="${esc(p.id)}" data-key="${esc(key)}" value="${qv || ''}" placeholder="0" aria-label="${esc(p.name)} 주문 수량"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="${step}" aria-label="${esc(p.name)} 수량 더하기">+</button></div></div>`;
   }).join('');
-  const emptyMsg = chip === '즐겨찾기' ? ['즐겨찾기한 품목이 없어요', '☆를 누르면 자주 찾는 품목을 모아 볼 수 있어요.'] : chip === '자주 주문' ? ['아직 주문 기록이 없어요', '주문하면 자주 주문한 품목이 여기에 모여요.'] : qq ? ['검색 결과가 없어요', '제품명 일부나 보험코드로 다시 찾아 보세요.'] : ['판매 중인 품목이 없어요', ''];
+  const emptyMsg = chip === '즐겨찾기' ? ['즐겨찾기한 품목이 없어요', '품목 이름 왼쪽의 별을 누르면 자주 찾는 품목을 모아 볼 수 있어요.'] : chip === '자주 주문' ? ['아직 주문 기록이 없어요', '주문하면 자주 주문한 품목이 여기에 모여요.'] : qq ? ['검색 결과가 없어요', '제품명 일부나 보험코드로 다시 찾아 보세요.'] : ['판매 중인 품목이 없어요', ''];
   return `<div class="shop">
     <div class="stack" style="gap:12px;min-width:0">
-      ${last ? `<div class="again"><span>최근 주문 <b class="mono">${esc(last.no)}</b> · ${fmtD(last.created_at)} · ${(last.lines || []).length}품목 ${won(last.total)}원</span><button class="btn sm" data-act="reorder" data-id="${esc(last.id)}">그대로 다시 담기</button></div>` : ''}
+      ${last ? `<div class="again">${meta(`최근 주문 <b class="mono">${esc(last.no)}</b>`, fmtD(last.created_at), `${(last.lines || []).length}품목 ${won(last.total)}원`)}<button class="btn sm" data-act="reorder" data-id="${esc(last.id)}">그대로 다시 담기</button></div>` : ''}
       <div class="shop-tools">
         <div class="row"><div class="search" style="max-width:none"><label class="sr" for="shopQ">품목 검색</label><input class="inp" id="shopQ" data-bind="shopQ" value="${esc(S.ui.shopQ)}" placeholder="제품명·성분·보험코드로 찾기" autocomplete="off"></div>
           <label class="sr" for="shopGroup">효능군</label><select class="inp" id="shopGroup" data-bind="shopGroup" style="width:auto;max-width:220px"><option value="">효능군 전체</option>${groups.map(g => opt(g, S.ui.shopGroup)).join('')}</select></div>
-        <div class="chips">${chips.map(c => `<button class="chip${chip === c ? ' on' : ''}" data-act="shopChip" data-c="${c}">${c === '즐겨찾기' ? '★ 즐겨찾기' : c}</button>`).join('')}</div>
+        <div class="chips">${chips.map(c => `<button class="chip${chip === c ? ' on' : ''}" data-act="shopChip" data-c="${c}">${c}</button>`).join('')}</div>
       </div>
       ${items.length ? `<div class="plist">${rows}</div>` : `<div class="panel"><div class="empty"><b>${emptyMsg[0]}</b>${emptyMsg[1]}</div></div>`}
     </div>
@@ -564,7 +566,7 @@ function cartPanel(ctx) {
   const key = ctx.account_id; const cart = cartOf(key);
   const lines = Object.entries(cart.lines).map(([pid, qv]) => { const p = S.products.get(pid); return p && p.active !== false ? { p, qty: qv, price: priceFor(p, ctx) } : null; }).filter(Boolean);
   const total = lines.reduce((a, l) => a + l.qty * l.price, 0); const v = vatSplit(total);
-  const bar = lines.length ? `<div class="cartbar"><span class="cb-t">${lines.length}품목 · ${won(v.sum)}원</span><button class="btn primary" data-act="toCart">장바구니 보기</button></div>` : '';
+  const bar = lines.length ? `<div class="cartbar"><span class="cb-t">${meta(`${lines.length}품목`, `${won(v.sum)}원`)}</span><button class="btn primary" data-act="toCart">장바구니 보기</button></div>` : '';
   return `<aside class="cart" id="cart" aria-label="장바구니"><div class="cart-h"><h2>장바구니</h2><span class="muted">${lines.length}품목</span></div>
     <div class="cart-lines" data-keep="cartl">${lines.length ? lines.map(l => `<div class="cl"><span class="cl-n">${esc(l.p.name)}</span><span class="cl-a">${won(l.qty * l.price)}</span><span class="cl-q">${won(l.qty)}${esc(l.p.unit || '')} × ${won(l.price)}원</span><button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('') : `<div class="empty" style="padding:22px 16px">목록에서 수량을 입력하면<br>여기에 담겨요.</div>`}</div>
     <div class="cart-f">
@@ -582,7 +584,7 @@ function historyView() {
   return `<div class="stack" style="gap:12px">${list.map(o => {
     const open = !!S.ui.open[o.id]; const idx = flow.indexOf(o.status); const shipped = o.status === '출고' || o.status === '완료';
     const steps = o.status === '취소' ? pill('취소') : `<div class="steps">${flow.map((s, i) => `<span class="${i <= idx ? 'done' : ''}"><i></i>${ST[s][1]}</span>`).join('')}</div>`;
-    return `<article class="ocard"><div class="ocard-h"><div style="min-width:0;flex:1 1 220px"><div class="t"><span class="mono">${esc(o.no)}</span> · ${fmtDT(o.created_at)}</div><div class="muted" style="font-size:12.5px">${(o.lines || []).length}품목 · ${won(o.total)}원${o.want_date ? ` · 희망 ${fmtD(o.want_date)}` : ''}</div></div>${steps}
+    return `<article class="ocard"><div class="ocard-h"><div style="min-width:0;flex:1 1 220px"><div class="t oc-no">${esc(o.no)}</div><div class="muted" style="font-size:13px">${meta(fmtDT(o.created_at), `${(o.lines || []).length}품목 ${won(o.total)}원`, o.want_date ? `희망 ${fmtD(o.want_date)}` : '')}</div></div>${steps}
       <div class="row"><button class="btn sm ghost" data-act="toggleOpen" data-id="${esc(o.id)}" aria-expanded="${open}">${open ? '접기' : '상세'}</button><button class="btn sm" data-act="reorder" data-id="${esc(o.id)}">다시 담기</button>${shipped && window.XLSX ? `<button class="btn sm" data-act="statement" data-id="${esc(o.id)}">거래명세서</button>` : ''}${o.status === '접수' ? `<button class="btn sm danger${S.ui.armed === 'cx:' + o.id ? ' armed' : ''}" data-act="custCancel" data-id="${esc(o.id)}">${S.ui.armed === 'cx:' + o.id ? '한 번 더 누르면 취소' : '주문 취소'}</button>` : ''}</div></div>
       ${open ? `<div class="ocard-b"><div class="tbl-wrap" style="border:0;border-radius:0"><table><thead><tr><th>품목</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th>${shipped ? '<th>로트 · 유효기간</th>' : ''}</tr></thead><tbody>${(o.lines || []).map(l => `<tr><td><div class="t">${esc(l.name)}</div><div class="s">${esc(l.spec || '')} ${l.code ? '· ' + esc(l.code) : ''}</div></td><td class="num">${l.oqty != null && num(l.oqty) !== num(l.qty) ? `<span class="muted"><s>${won(l.oqty)}</s></span> ` : ''}${won(l.qty)}${esc(l.unit || '')}</td><td class="num">${won(l.price)}</td><td class="num">${won(num(l.qty) * num(l.price))}</td>${shipped ? `<td class="s">${esc(l.lot || '-')} ${l.exp ? '· ' + fmtD(l.exp) : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>${o.memo || o.admin_memo ? `<div class="panel-b" style="display:grid;gap:4px;font-size:13px">${o.memo ? `<div><span class="muted">요청사항</span> ${esc(o.memo)}</div>` : ''}${o.admin_memo ? `<div><span class="muted">원윤메디팜 안내</span> ${esc(o.admin_memo)}</div>` : ''}</div>` : ''}</div>` : ''}
     </article>`; }).join('')}</div>`;
@@ -692,7 +694,7 @@ const MODALS = {
       <datalist id="lot-dl">${lots.map(l => `<option value="${esc(l.lot)}">${esc(fmtD(l.exp))} · ${won(l.qty)}</option>`).join('')}</datalist>
       ${lots.length ? `<div><div class="sec-t" style="margin-bottom:6px">로트별 재고</div><div class="tbl-wrap"><table><thead><tr><th>로트</th><th>유효기간</th><th class="num">수량</th></tr></thead><tbody>${lots.map(l => `<tr><td class="mono">${esc(l.lot || '(미입력)')}</td><td>${l.exp ? `<span class="tag ${daysUntil(l.exp) <= 60 ? 'bad' : daysUntil(l.exp) <= 180 ? 'warn' : ''}">${fmtD(l.exp)}</span>` : '-'}</td><td class="num">${won(l.qty)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
       ${mv.length ? `<div><div class="sec-t" style="margin-bottom:6px">최근 입출고</div><div class="tbl-wrap"><table><tbody>${mv.map(m => `<tr><td class="tabnum nowrap">${fmtD(m.date)}</td><td>${esc(m.type)}</td><td class="num">${num(m.qty) > 0 ? '+' : ''}${won(m.qty)}</td><td class="s">${esc(m.lot || '')} ${esc(m.ref || m.memo || '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
-    return frame('입출고 등록', `${esc(p.name)} · ${esc(p.spec || '')}`, body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="saveStock"${busyAttr()}>등록</button>`);
+    return frame('입출고 등록', meta(esc(p.name), esc(p.spec || '')), body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="saveStock"${busyAttr()}>등록</button>`);
   },
   account() {
     const ex = M.data.id ? S.accounts.get(M.data.id) : null; const d = M.draft;
@@ -761,13 +763,13 @@ const MODALS = {
         <tr><th colspan="2">합계금액</th><td colspan="3" class="num"><b>${won(t.total)}</b></td><td colspan="4">이 금액을 <b>${t.purpose === 'RECEIPT' ? '영수' : '청구'}</b> 함</td></tr>
       </table></div>
       ${editable ? `<div class="fgrid">${msel('영수/청구', 'purpose', [['CLAIM', '청구 (외상 · 나중에 입금)'], ['RECEIPT', '영수 (이미 입금됨)']], { live: true })}${mf('비고 (선택)', 'memo', { ph: '계산서에 표시할 메모' })}</div><p class="hint">거래처 정보를 고쳤다면 ‘받는 쪽 정보 새로 반영’을 눌러 계산서에 다시 담아요. 품목은 출고내역에서 만들어져요.</p>` : ''}
-      <p class="hint">${esc(t.kind)} · ${esc(t.period)} 공급분 · 출고 ${[...S.shipments.values()].filter(s => s.invoice_id === t.id).length}건 묶음${t.mode ? ` · ${t.mode === 'live' ? '실제 발행' : '테스트'}` : ''}</p>`;
+      <p class="hint">${meta(esc(t.kind), `${esc(t.period)} 공급분`, `출고 ${[...S.shipments.values()].filter(s => s.invoice_id === t.id).length}건 묶음`, t.mode ? (t.mode === 'live' ? '실제 발행' : '테스트') : '')}</p>`;
     let foot = '';
     if (editable) foot = `${armBtn('voidInv', '이 계산서 취소', '한 번 더 누르면 취소')}<button class="btn ghost" data-act="refreshRecipient"${busyAttr()}>받는 쪽 정보 새로 반영</button><span class="spacer"></span><button class="btn primary" data-act="issueInvoice"${busyAttr()}${probs.length || !ready ? ' disabled' : ''}>${S.tax?.mode === 'live' ? '국세청에 발행' : '테스트 발행'}</button>`;
     else if (t.status === '발행중') foot = `<span class="spacer"></span><button class="btn primary" data-act="refreshInvoice"${busyAttr()}>상태 확인</button>`;
     else if (t.status === '발행완료') foot = `<button class="btn ghost" data-act="refreshInvoice"${busyAttr()}>상태 확인</button><span class="spacer"></span><button class="btn primary" data-act="invoicePdf"${busyAttr()}>PDF 열기</button>`;
     else foot = `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button>`;
-    return frame(`세금계산서 ${tiPill(t.status)}`, `${esc(sp.organizationName || '')} · ${won(t.total)}원`, body, foot);
+    return frame(`세금계산서 ${tiPill(t.status)}`, meta(esc(sp.organizationName || ''), `${won(t.total)}원`), body, foot);
   },
   login() {
     const p = S.profiles.get(M.data.uid); if (!p) return frame('계정', '', '<p class="muted">계정을 찾을 수 없어요.</p>');
