@@ -13,8 +13,8 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://hangeul.pstatic.net" crossorigin>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="https://hangeul.pstatic.net/hangeul_static/css/maru-buri.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Serif+KR:wght@500;600&display=swap">
 <style>
 /*
@@ -22,6 +22,9 @@
   Layout: 짙은 약장 그린 레일(관리자) / 그린 상단 띠(거래처) + 자기빛 회녹색 작업면.
           내용은 카드 상자 대신 종이 한 장 위의 문서처럼, 표는 가는 선으로. 골드는 금박처럼 마크와 '지금 위치'에만.
 */
+/* 마루부리: 네이버 배포 CSS는 굵기마다 이름이 달라서, 한 이름(400/600)으로 다시 묶어 씀 */
+@font-face{font-family:'WY MaruBuri';font-weight:400;font-style:normal;font-display:swap;src:url(https://hangeul.pstatic.net/hangeul_static/webfont/MaruBuri/MaruBuri-Regular.woff2) format('woff2'),url(https://hangeul.pstatic.net/hangeul_static/webfont/MaruBuri/MaruBuri-Regular.woff) format('woff')}
+@font-face{font-family:'WY MaruBuri';font-weight:600;font-style:normal;font-display:swap;src:url(https://hangeul.pstatic.net/hangeul_static/webfont/MaruBuri/MaruBuri-SemiBold.woff2) format('woff2'),url(https://hangeul.pstatic.net/hangeul_static/webfont/MaruBuri/MaruBuri-SemiBold.woff) format('woff')}
 :root{
   --page:#ECEEE9; --sheet:#FBFBF8; --sunken:#E5E8E2; --rule:#D8DCD5; --rule-2:#C1C7BF;
   --ink:#1C2320; --ink-2:#46514B; --ink-3:#77817B;
@@ -32,7 +35,7 @@
   --ok:#2B684C; --warn:#9E650F; --bad:#983F33; --info:#3D5C82;
   --ok-soft:#E1ECE5; --warn-soft:#F4EAD6; --bad-soft:#F3E2DE; --info-soft:#E2E8F1;
   --scrim:rgba(14,24,20,.5); --shadow:0 30px 70px rgba(14,30,24,.22);
-  --f-serif:'MaruBuri','Noto Serif KR','Apple SD Gothic Neo',serif;
+  --f-serif:'WY MaruBuri','Noto Serif KR','Apple SD Gothic Neo',serif;
   --f-sans:'Pretendard Variable','Pretendard',-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
   --f-word:'Cormorant Garamond','Times New Roman',serif;
   color-scheme:light;
