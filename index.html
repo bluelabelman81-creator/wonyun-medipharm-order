@@ -247,6 +247,28 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 .cl.out .cl-n{color:var(--ink-3)}
 .cl.out .tag{justify-self:end}
 .ctabs .cnt{margin-left:6px;vertical-align:1px}
+/* 식약처 의약품 정보 */
+.dinfo{background:var(--sheet);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.dinfo-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 14px;padding:14px 20px;border-bottom:1px solid var(--rule);background:color-mix(in srgb,var(--gold-tint) 50%,var(--sheet))}
+.dinfo-h h3{font-family:var(--f-head);font-size:16px;font-weight:600}
+.dinfo-pad{padding:14px 20px}
+.dcard{display:grid;grid-template-columns:64px minmax(0,1fr) auto;grid-template-areas:"img main act";gap:12px 18px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--rule)}
+.dimg{grid-area:img;width:64px;height:64px;border:1px solid var(--rule);border-radius:6px;background:var(--sunken);padding:0;overflow:hidden;cursor:pointer;display:grid;place-items:center;color:var(--ink-3);font-size:11px;line-height:1.3}
+.dimg img{width:100%;height:100%;object-fit:contain;background:#fff;display:block}
+.dmain{grid-area:main;min-width:0;display:grid;gap:3px}
+.dname{font-weight:600;line-height:1.4}
+.dlink{border:0;background:none;padding:0;font:inherit;color:var(--ink);text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.dlink:hover{text-decoration:underline;text-underline-offset:3px}
+.dmeta{font-size:12.5px;color:var(--ink-3)}
+.dsum{font-size:13px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dmatch{font-size:12.5px;color:var(--gold-ink);font-weight:500}
+.dact{grid-area:act;justify-self:end}
+.plink{border:0;background:none;padding:0;font:inherit;font-size:12.5px;color:var(--gold-ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.dhead{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+.dphoto{width:150px;max-height:150px;object-fit:contain;border:1px solid var(--rule);border-radius:6px;background:#fff}
+.dsec{display:grid;gap:6px}
+.dtext{white-space:pre-line;font-size:14px;line-height:1.7;color:var(--ink-2);max-width:80ch}
+.dtext.long{max-height:280px;overflow:auto;padding:12px 14px;border:1px solid var(--rule);border-radius:4px;background:var(--sunken);max-width:none}
 .qty{grid-area:qty;display:flex;justify-self:end;height:36px;border:1px solid var(--rule-2);border-radius:4px;overflow:hidden;background:var(--sheet)}
 .qty button{width:34px;border:0;background:transparent;color:var(--ink-2);font-size:17px;cursor:pointer;line-height:1}
 .qty button:hover{background:var(--sunken);color:var(--ink)}
@@ -398,6 +420,11 @@ td .s{font-size:12.5px;color:var(--ink-3)}
   .dlg.wide{width:100%}
   .dlg-h,.dlg-b,.dlg-f{padding-inline:18px}
   .sp-row{grid-template-columns:minmax(0,1fr) 96px auto}
+  .dcard{grid-template-columns:56px minmax(0,1fr);grid-template-areas:"img main" "img act";padding:14px 16px}
+  .dimg{width:56px;height:56px}
+  .dact{justify-self:start}
+  .dinfo-h,.dinfo-pad{padding-inline:16px}
+  .dphoto{width:110px}
   .ctop-who .muted{display:none}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -411,6 +438,6 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 <noscript><p style="padding:24px">자바스크립트를 켜야 주문 사이트를 쓸 수 있어요.</p></noscript>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

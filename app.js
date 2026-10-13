@@ -71,9 +71,10 @@ const S = {
     shopQ: '', shopChip: '전체', shopGroup: '',
     exFrom: thisMonth() + '-01', exTo: today(), settleMonth: thisMonth(),
     invMonth: (new Date().getDate() <= 10 ? prevMonth() : thisMonth()), invStatus: '',
-    rqStatus: '대기', rqq: '', setd: null, open: {}, armed: '', lastCreds: null
+    rqStatus: '대기', rqq: '', drugMore: false, drugTestQ: '타이레놀', setd: null, open: {}, armed: '', lastCreds: null
   },
-  cart: {}, favs: new Set(LS.get('favs', []))
+  cart: {}, favs: new Set(LS.get('favs', [])),
+  drugOn: null, dq: {}, drugCache: new Map(), drugItems: new Map()
 };
 const M = { kind: null, data: null, draft: {}, live: false, size: '', busy: false, armed: '' };
 
@@ -188,6 +189,7 @@ async function enter(user) {
       S.phase = 'customer';
     }
     subscribeRealtime();
+    loadDrugStatus(false);
   } catch (e) { console.error(e); S.phase = 'error'; S.err = errMsg(e); }
   render();
 }
@@ -195,6 +197,92 @@ async function loadTaxStatus(showErr) {
   try { S.tax = await fn('tax-invoice', { action: 'status' }); schedule(); }
   catch (e) { S.tax = { error: errMsg(e) }; if (showErr) toast(errMsg(e), 'bad'); schedule(); }
 }
+
+/* ---------- 식약처 의약품 정보 ---------- */
+async function loadDrugStatus(showErr) {
+  try { const r = await fn('drug-info', { action: 'status' }); S.drugOn = !!r.hasKey; }
+  catch (e) { S.drugOn = false; if (showErr) toast(errMsg(e), 'bad'); }
+  schedule();
+}
+const normN = s => String(s || '').replace(/\([^)]*\)/g, '').replace(/[\s·.,/_-]/g, '').toLowerCase();
+function catalogMatch(d) {
+  const ps = products().filter(p => p.active !== false);
+  return (d.edi?.length && ps.find(p => p.code && d.edi.includes(normCode(p.code)))) || ps.find(p => normN(p.name) === normN(d.name)) || null;
+}
+let drugTimer = 0;
+function drugSoon(target = 'shop') { clearTimeout(drugTimer); drugTimer = setTimeout(() => runDrug(target === 'test' ? S.ui.drugTestQ : S.ui.shopQ, target), 650); }
+async function runDrug(q, target = 'shop') {
+  if (!S.drugOn) return;
+  q = String(q || '').replace(/\s+/g, ' ').trim();
+  if (q.replace(/\s/g, '').length < 2) { S.dq[target] = null; schedule(); return; }
+  const hit = S.drugCache.get(q);
+  if (hit) { S.dq[target] = { q, status: 'done', ...hit }; schedule(); return; }
+  S.dq[target] = { q, status: 'loading' }; S.ui.drugMore = false; schedule();
+  try {
+    const r = await fn('drug-info', { action: 'search', q });
+    if (r.needsKey) { S.drugOn = false; S.dq[target] = null; schedule(); return; }
+    const res = { items: r.items || [], total: r.total || 0, warnings: r.warnings || [] };
+    S.drugCache.set(q, res); for (const d of res.items) if (!S.drugItems.has(d.seq)) S.drugItems.set(d.seq, d);
+    if (S.dq[target]?.q === q) S.dq[target] = { q, status: 'done', ...res };
+  } catch (e) { if (S.dq[target]?.q === q) S.dq[target] = { q, status: 'error', err: errMsg(e) }; }
+  schedule();
+}
+const kindTag = k => /전문/.test(k || '') ? '<span class="tag info">전문</span>' : /일반/.test(k || '') ? '<span class="tag">일반</span>' : '';
+function drugAction(d, p, where) {
+  const admin = S.profile?.role === 'admin';
+  if (p) {
+    if (admin) return orderable(p) ? '<span class="avail ok">우리 상품</span>' : '<span class="avail out">우리 상품 · 품절</span>';
+    if (orderable(p)) {
+      if (where === 'modal') return `<button class="btn primary" data-act="drugAdd" data-id="${esc(p.id)}">장바구니에 담기</button>`;
+      const key = S.myAccount.id; const qv = cartOf(key).lines[p.id] || 0; const step = Math.max(1, num(p.step) || 1);
+      return `<div class="qty"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="-${step}" aria-label="${esc(p.name)} 수량 빼기">−</button><input id="dq-${esc(p.id)}" inputmode="numeric" autocomplete="off" data-cartqty="${esc(p.id)}" data-key="${esc(key)}" value="${qv || ''}" placeholder="0" aria-label="${esc(p.name)} 주문 수량"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="${step}" aria-label="${esc(p.name)} 수량 더하기">+</button></div>`;
+    }
+    return myOpenReq(p.id) ? '<span class="tag gold">재고 요청함</span>' : `<button class="btn${where === 'modal' ? ' primary' : ' sm'}" data-act="reqStock" data-id="${esc(p.id)}">재고 요청</button>`;
+  }
+  if (admin) return `<button class="btn${where === 'modal' ? ' primary' : ' sm'}" data-act="newFromDrug" data-seq="${esc(d.seq)}">상품으로 등록</button>`;
+  return [...S.reqs.values()].some(r => r.ext_seq === d.seq && isOpenReq(r)) ? '<span class="tag gold">보유 요청함</span>' : `<button class="btn${where === 'modal' ? ' primary' : ' sm'}" data-act="reqDrug" data-seq="${esc(d.seq)}">보유 요청</button>`;
+}
+function drugPanel(target) {
+  const st = S.dq[target]; if (!S.drugOn || !st) return '';
+  const head = `<div class="dinfo-h"><h3>식약처 의약품 정보</h3><span class="hint">'${esc(st.q)}' 검색 결과 · 식품의약품안전처 공공데이터</span></div>`;
+  if (st.status === 'loading') return `<section class="dinfo">${head}<div class="loading dinfo-pad"><i></i>식약처 자료를 찾는 중</div></section>`;
+  if (st.status === 'error') return `<section class="dinfo">${head}<p class="dinfo-pad muted">식약처 자료를 불러오지 못했어요. ${esc(st.err || '')}</p></section>`;
+  const warn = S.profile?.role === 'admin' && st.warnings?.length ? `<div class="note warn" style="margin:14px 20px 0"><b>확인이 필요해요</b>${st.warnings.map(esc).join(' / ')}</div>` : '';
+  if (!st.items.length) return `<section class="dinfo">${head}${warn}<p class="dinfo-pad muted">식약처 자료에서도 찾지 못했어요. 제품명이나 성분명을 다르게 적어 보세요.</p></section>`;
+  const rank = x => x.p ? (orderable(x.p) ? 0 : 1) : 2;
+  const list = st.items.map(d => ({ d, p: catalogMatch(d) })).sort((a, b) => rank(a) - rank(b));
+  const shown = S.ui.drugMore ? list : list.slice(0, 6);
+  return `<section class="dinfo">${head}${warn}${shown.map(({ d, p }) => `<article class="dcard">
+      <button class="dimg" data-act="drugDetail" data-seq="${esc(d.seq)}" aria-label="${esc(d.name)} 자세히">${d.image ? `<img src="${esc(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<span>사진 없음</span>'}</button>
+      <div class="dmain"><div class="dname"><button class="dlink" data-act="drugDetail" data-seq="${esc(d.seq)}">${esc(d.name)}</button> ${kindTag(d.kind)}</div>
+        <div class="dmeta">${meta(esc(d.company || ''), esc(d.ingr || d.strength || ''))}</div>
+        ${d.summary ? `<p class="dsum">${esc(d.summary)}</p>` : ''}
+        ${p ? `<div class="dmatch">원윤메디팜 취급 품목 · ${esc(p.name)}${p.spec ? ' ' + esc(p.spec) : ''}</div>` : ''}</div>
+      <div class="dact">${drugAction(d, p, 'card')}</div></article>`).join('')}
+    ${list.length > shown.length ? `<div class="dinfo-pad"><button class="btn sm ghost" data-act="drugMore">${list.length - shown.length}개 더 보기</button></div>` : ''}
+    ${st.total > st.items.length ? `<p class="dinfo-pad hint">식약처 자료 ${won(st.total)}건 중 ${st.items.length}건만 보여요. 제품명을 더 자세히 적으면 정확해져요.</p>` : ''}
+  </section>`;
+}
+function openDrug(seq, pid) {
+  openModal('drug', { seq: seq || null, pid: pid || null, item: seq ? S.drugItems.get(seq + ':full') || null : null, err: '' }, {}, { size: 'wide' });
+  loadDrug();
+}
+async function loadDrug() {
+  const m = M.data; if (!m || M.kind !== 'drug' || m.item) return;
+  try {
+    if (!m.seq && m.pid) {
+      const p = S.products.get(m.pid);
+      const r = await fn('drug-info', { action: 'match', code: p?.code || '', name: p?.name || '' });
+      if (M.data !== m) return;
+      if (!r.seq) { m.err = '식약처 자료에서 이 품목을 정확히 찾지 못했어요. 주문하기 검색창에 이름을 넣으면 비슷한 품목을 볼 수 있어요.'; renderModal(); return; }
+      m.seq = r.seq;
+    }
+    const r = await fn('drug-info', { action: 'detail', seq: m.seq });
+    if (M.data !== m) return;
+    m.item = r.item; S.drugItems.set(m.seq + ':full', r.item); renderModal();
+  } catch (e) { if (M.data === m) { m.err = errMsg(e); renderModal(); } }
+}
+const findDrug = seq => S.drugItems.get(seq + ':full') || S.drugItems.get(seq);
 
 /* ---------- derived ---------- */
 const products = () => [...S.products.values()];
@@ -544,6 +632,13 @@ function settingsView() {
         ${step(!!t.certificate?.expiresAt, '공동인증서 등록', `<p class="hint">법인 공동인증서(전자세금계산서용 또는 범용)를 볼타 화면에서 등록해요. 테스트 키일 때는 볼타가 안내하는 테스트 인증서를 써요.</p><div class="row"><button class="btn sm" data-act="certUrl"${cfg.issuer_id ? '' : ' disabled'}>인증서 등록 화면 열기</button>${t.certificate?.expiresAt ? `<span class="hint">만료 ${fmtD(t.certificate.expiresAt)}</span>` : ''}</div>`)}
       </ol>
     </section>
+    <section class="panel"><div class="panel-h"><h2>의약품 정보 연동 (식약처)</h2><button class="btn sm ghost" data-act="drugCheck">상태 새로 고침</button></div>
+      <ol class="list" style="padding:0">
+        ${step(!!S.drugOn, `공공데이터포털 인증키 등록 ${S.drugOn == null ? '<span class="tag">확인 중</span>' : ''}`, `<p class="hint">거래처가 주문 화면에서 약품명을 검색하면 식약처 자료(성분·효능·용법·주의사항·사진)를 함께 보여 줘요. data.go.kr에 가입해 아래 API를 활용신청하고, 마이페이지의 일반 인증키(Decoding)를 Supabase 비밀값 <b>DATA_GO_KR_KEY</b>로 등록해요. 무료예요.</p>
+          <div class="row"><a class="btn sm" href="https://www.data.go.kr/data/15095677/openapi.do" target="_blank" rel="noopener">제품 허가정보 (필수)</a><a class="btn sm" href="https://www.data.go.kr/data/15075057/openapi.do" target="_blank" rel="noopener">e약은요 (선택)</a><a class="btn sm" href="https://www.data.go.kr/data/15057639/openapi.do" target="_blank" rel="noopener">낱알식별 (선택)</a><a class="btn sm ghost" href="${CFG.secretsUrl}" target="_blank" rel="noopener">비밀값 등록 화면</a></div>`)}
+        ${step(!!(S.dq.test?.status === 'done' && S.dq.test.items.length && !(S.dq.test.warnings || []).length), '조회 시험', `<p class="hint">키를 등록하고 승인이 반영되면(보통 수십 분~몇 시간) 여기서 시험해 보세요.</p><div class="row"><label class="sr" for="drugTestQ">시험 검색어</label><input class="inp" id="drugTestQ" data-bind="drugTestQ" data-norender value="${esc(S.ui.drugTestQ)}" style="max-width:240px"><button class="btn sm" data-act="drugTest"${S.drugOn ? '' : ' disabled'}>찾아보기</button></div>${drugPanel('test')}`)}
+      </ol>
+    </section>
     <section class="panel"><div class="panel-h"><h2>관리자 계정</h2><button class="btn sm" data-act="newAdmin">관리자 추가</button></div>
       <ul class="list">${admins.map(p => `<li class="li"><div class="li-main"><div class="li-t"><span class="mono">${esc(p.login_id)}</span> ${esc(p.name || '')}${p.user_id === S.user.id ? ' <span class="tag gold">나</span>' : ''}${p.active ? '' : ' <span class="tag bad">잠김</span>'}</div><div class="li-s">${fmtDT(p.created_at)} 생성</div></div>${p.user_id === S.user.id ? `<button class="btn sm" data-act="myPassword">내 비밀번호 변경</button>` : `<button class="btn sm ghost" data-act="loginMenu" data-u="${esc(p.user_id)}">관리</button>`}</li>`).join('')}</ul>
     </section>
@@ -580,7 +675,7 @@ function shopView(ctx) {
   const rows = items.map(p => {
     const qv = cart.lines[p.id] || 0; const pr = priceFor(p, ctx); const step = Math.max(1, num(p.step) || 1); const ok = orderable(p); const rq = ok ? null : myOpenReq(p.id);
     return `<div class="prow${qv && ok ? ' in' : ''}${ok ? '' : ' out'}"><button class="fav${S.favs.has(p.id) ? ' on' : ''}" data-act="fav" data-id="${esc(p.id)}" aria-label="${esc(p.name)} 즐겨찾기" aria-pressed="${S.favs.has(p.id)}">${STAR}</button>
-      <div class="pinfo"><div class="pname">${esc(p.name)}</div><div class="pmeta">${p.spec ? `<span>${esc(p.spec)}</span>` : ''}${p.code ? `<span class="mono">${esc(p.code)}</span>` : ''}${p.grp ? `<span>${esc(p.grp)}</span>` : ''}${step > 1 ? `<span>${step}${esc(p.unit || '')} 단위</span>` : ''}</div></div>
+      <div class="pinfo"><div class="pname">${esc(p.name)}</div><div class="pmeta">${p.spec ? `<span>${esc(p.spec)}</span>` : ''}${p.code ? `<span class="mono">${esc(p.code)}</span>` : ''}${p.grp ? `<span>${esc(p.grp)}</span>` : ''}${step > 1 ? `<span>${step}${esc(p.unit || '')} 단위</span>` : ''}${S.drugOn && (p.kind || '의약품') === '의약품' ? `<button class="plink" data-act="drugOf" data-id="${esc(p.id)}">약품 정보</button>` : ''}</div></div>
       <div class="pprice"><span><b>${won(pr)}</b><span class="u">원/${esc(p.unit || '개')}</span></span>${pr !== num(p.price) ? `<s>${won(p.price)}원</s>` : ''}</div>
       <div class="pstock">${availTag(p)}</div>
       ${ok ? `<div class="qty"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="-${step}" aria-label="${esc(p.name)} 수량 빼기">−</button><input id="q-${esc(p.id)}" inputmode="numeric" autocomplete="off" data-cartqty="${esc(p.id)}" data-key="${esc(key)}" value="${qv || ''}" placeholder="0" aria-label="${esc(p.name)} 주문 수량"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="${step}" aria-label="${esc(p.name)} 수량 더하기">+</button></div>` : rq ? `<div class="pact"><span class="tag gold">재고 요청함</span><span class="s">${fmtD(rq.created_at)} ${RQ[rq.status][1]}</span></div>` : `<div class="pact"><button class="btn sm" data-act="reqStock" data-id="${esc(p.id)}">재고 요청</button></div>`}</div>`;
@@ -598,6 +693,7 @@ function shopView(ctx) {
         <div class="chips">${chips.map(c => `<button class="chip${chip === c ? ' on' : ''}" data-act="shopChip" data-c="${c}">${c}</button>`).join('')}</div>
       </div>
       ${items.length ? `<div class="plist">${rows}</div>` : `<div class="panel"><div class="empty"><b>${emptyMsg[0]}</b>${emptyMsg[1]}${qq ? `<div style="margin-top:14px">${reqCta}</div>` : ''}</div></div>`}
+      ${qq ? drugPanel('shop') : ''}
       ${items.length && qq ? `<div class="reqline"><span>찾는 약품이 목록에 없나요? 원윤메디팜에 보유를 요청할 수 있어요.</span>${reqCta}</div>` : ''}
     </div>
     ${cartPanel(ctx)}
@@ -717,11 +813,38 @@ const MODALS = {
     else foot = `<span class="spacer"></span><button class="btn" data-act="restoreOrder"${busyAttr()}>접수 상태로 복구</button>`;
     return frame(`<span class="mono" style="font-size:16px">${esc(o.no)}</span> ${pill(o.status)}`, `${(o.lines || []).length}품목`, body, foot);
   },
+  drug() {
+    const m = M.data; const d = m.item; const admin = S.profile?.role === 'admin';
+    if (!d) return frame('약품 정보', m.err ? '' : '식약처 자료를 불러오는 중', m.err ? `<div class="note">${esc(m.err)}</div>` : '<div class="loading"><i></i>불러오는 중</div>', `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button>`);
+    const p = (m.pid && S.products.get(m.pid)) || catalogMatch(d);
+    const e = d.easy || {};
+    const sec = (title, text, long) => text ? `<div class="dsec"><div class="sec-t">${title}</div><div class="dtext${long ? ' long' : ''}">${esc(text)}</div></div>` : '';
+    const body = `
+      <div class="dhead">${d.image ? `<img class="dphoto" src="${esc(d.image)}" alt="${esc(d.name)} 사진" referrerpolicy="no-referrer">` : ''}
+        <div class="kv" style="flex:1">
+          <div><span>업체</span><b>${esc(d.company || '-')}</b></div><div><span>구분</span><b>${esc(d.kind || '-')}</b></div>
+          <div><span>주성분</span><b>${esc(d.ingr || '-')}</b></div><div><span>성분·함량</span><b>${esc(d.strength || '-')}</b></div>
+          <div><span>보험코드</span><b class="mono">${esc((d.edi || []).join(', ') || '-')}</b></div><div><span>ATC 코드</span><b class="mono">${esc(d.atc || '-')}</b></div>
+          <div><span>저장방법</span><b>${esc(d.storage || '-')}</b></div><div><span>유효기간</span><b>${esc(d.valid || '-')}</b></div>
+        </div></div>
+      ${p ? `<div class="note ${orderable(p) ? 'ok' : 'warn'}"><b>원윤메디팜 취급 품목</b>${esc(p.name)}${p.spec ? ' ' + esc(p.spec) : ''} · ${orderable(p) ? '지금 주문할 수 있어요' : '지금은 품절이에요'}</div>` : `<div class="note"><b>원윤메디팜에서 아직 취급하지 않는 약품이에요</b>${admin ? '상품으로 등록하면 거래처가 주문할 수 있어요.' : '보유 요청을 남기면 원윤메디팜이 확인해서 안내해 드려요.'}</div>`}
+      ${d.chart ? sec('성상', d.chart) : ''}
+      ${sec('효능·효과 (쉬운 설명)', e.efcy)}
+      ${sec('효능·효과', d.efficacy)}
+      ${sec('용법·용량', d.usage || e.use)}
+      ${sec('사용상의 주의사항', d.caution || [e.warn, e.atpn].filter(Boolean).join('\n'), true)}
+      ${sec('함께 주의할 약·음식', e.intrc)}
+      ${sec('이상반응', e.se)}
+      ${d.pack ? sec('포장단위', d.pack) : ''}
+      <p class="hint">출처: 식품의약품안전처 의약품 허가정보·e약은요·낱알식별 (공공데이터포털). 참고용 요약이에요. 최신 허가사항은 의약품안전나라 원문을 확인하세요.</p>`;
+    const foot = `${d.link ? `<a class="btn ghost" href="${esc(d.link)}" target="_blank" rel="noopener">의약품안전나라 원문</a>` : ''}<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button>${drugAction(d, p, 'modal')}`;
+    return frame(`${esc(d.name)} ${kindTag(d.kind)}`, '', body, foot);
+  },
   stockReq() {
-    const p = M.data.pid ? S.products.get(M.data.pid) : null;
+    const p = M.data.pid ? S.products.get(M.data.pid) : null; const ext = M.data.ext;
     const body = p ? `<div class="note"><b>지금 주문할 수 없는 품목이에요</b>요청을 남기면 원윤메디팜이 확인하고, 입고되면 '재고 요청' 탭과 주문하기 화면에 바로 표시돼요.</div>
       <div class="fgrid">${mf('필요 수량 (선택)', 'qty', { af: true, ph: `예: 한 달 300${p.unit && p.unit !== '개' ? p.unit : '개'}` })}${mf('메모 (선택)', 'memo', { ph: '예: 다음 주까지 필요해요' })}</div>`
-      : `<p class="hint">찾는 약품이 목록에 없으면 알려 주세요. 원윤메디팜이 확인해서 보유 여부를 안내해 드려요.</p>
+      : `${ext ? `<div class="note"><b>식약처 품목</b>${meta(esc(ext.name), esc(ext.company || ''), '품목기준코드 ' + esc(ext.seq), ext.code ? '보험코드 ' + esc(ext.code) : '')}</div>` : ''}<p class="hint">찾는 약품이 목록에 없으면 알려 주세요. 원윤메디팜이 확인해서 보유 여부를 안내해 드려요.</p>
       <div class="fgrid">${mf('약품 이름', 'name', { req: true, full: true, af: true, ph: '예: 리피토정 10mg' })}${mf('규격 (선택)', 'spec', { ph: '예: 10mg/1정' })}${mf('제조사 (선택)', 'maker')}${mf('필요 수량 (선택)', 'qty', { ph: '예: 한 달 300정' })}${mf('메모 (선택)', 'memo', { ph: '예: 보험코드, 대체약 가능 여부' })}</div>`;
     return frame(p ? '재고 요청' : '약품 보유 요청', p ? meta(esc(p.name), esc(p.spec || '')) : '', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="sendReq"${busyAttr()}>요청 보내기</button>`);
   },
@@ -733,6 +856,7 @@ const MODALS = {
       <div class="kv"><div><span>거래처</span><b>${esc(r.cust_name)}</b></div><div><span>요청일</span><b>${fmtDT(r.created_at)}</b></div><div><span>구분</span><b>${r.kind === '신규' ? '신규 취급 요청' : '품절 재입고 요청'}</b></div><div><span>필요 수량</span><b>${esc(r.qty || '-')}</b></div></div>
       <div class="note"><b>${esc(r.name)}</b>${meta(esc(r.spec || ''), esc(r.maker || ''), p ? (p.code ? esc(p.code) : '') : '목록에 없는 약품')}${p ? ` ${stockTag(p)}` : ''}</div>
       ${r.memo ? `<div class="note"><b>거래처 메모</b>${esc(r.memo)}</div>` : ''}
+      ${r.ext_seq ? `<div class="row"><span class="hint">${meta('식약처 품목기준코드 ' + esc(r.ext_seq), r.ext_code ? '보험코드 ' + esc(r.ext_code) : '')}</span>${S.drugOn ? `<button class="btn sm" data-act="drugDetail" data-seq="${esc(r.ext_seq)}">식약처 정보 보기</button>` : ''}</div>` : ''}
       ${others.length ? `<div class="note warn"><b>같은 품목 요청 ${others.length + 1}곳</b>${others.map(x => esc(x.cust_name)).join(', ')}도 기다리고 있어요.</div>` : ''}
       ${open ? `${mf('거래처에 보일 안내 (선택)', 'admin_memo', { full: true, ph: '예: 10월 20일 입고 예정이에요' })}
         <div class="row">${p ? `<button class="btn sm" data-act="reqToStock" data-id="${esc(p.id)}">입고 등록</button>${p.soldout ? `<button class="btn sm" data-act="reqUnsoldout" data-id="${esc(p.id)}">일시 품절 풀기</button>` : ''}<span class="hint">입고를 등록하거나 일시 품절을 풀면 이 품목 요청이 모두 자동으로 입고 완료돼요.</span>` : `<button class="btn sm" data-act="reqToProduct">상품으로 등록</button><span class="hint">상품으로 등록한 뒤 '입고 완료'를 누르면 거래처가 바로 주문할 수 있어요.</span>`}</div>`
@@ -887,7 +1011,8 @@ const A = {
   async sendReq() {
     const d = M.draft; const pid = M.data.pid || null; const name = String(d.name || '').trim();
     if (!pid && name.length < 2) return toast('약품 이름을 2자 이상 입력해 주세요', 'bad');
-    const ok = await run(() => rpc('request_stock', { p_product_id: pid, p_name: name, p_spec: String(d.spec || '').trim(), p_maker: String(d.maker || '').trim(), p_qty: String(d.qty || '').trim(), p_memo: String(d.memo || '').trim() }), pid ? '재고를 요청했어요. 입고되면 바로 알려 드려요' : '보유를 요청했어요. 확인 후 안내해 드려요');
+    const ext = M.data.ext || {};
+    const ok = await run(() => rpc('request_stock2', { p_product_id: pid, p_name: name, p_spec: String(d.spec || '').trim(), p_maker: String(d.maker || '').trim(), p_qty: String(d.qty || '').trim(), p_memo: String(d.memo || '').trim(), p_ext_seq: ext.seq || '', p_ext_code: ext.code || '' }), pid ? '재고를 요청했어요. 입고되면 바로 알려 드려요' : '보유를 요청했어요. 확인 후 안내해 드려요');
     if (ok) { closeModal(); reload('reqs', 'products'); }
   },
   async cancelReq(d) {
@@ -898,7 +1023,7 @@ const A = {
   orderReq(d) {
     const r = S.reqs.get(d.id); if (!r) return;
     Object.assign(S.ui, { shopQ: r.name, shopChip: '전체', shopGroup: '' }); S.cview = 'shop'; render(); window.scrollTo(0, 0);
-    setTimeout(() => document.getElementById('q-' + r.product_id)?.focus(), 0);
+    setTimeout(() => document.getElementById('q-' + r.product_id)?.focus(), 0); drugSoon('shop');
   },
   openReq(d) { const r = S.reqs.get(d.id); if (!r) return; openModal('reqAdmin', { id: r.id }, { admin_memo: r.admin_memo || '' }); },
   async setReq(d) {
@@ -908,7 +1033,24 @@ const A = {
   },
   reqToStock(d) { closeModal(); A.editStock({ id: d.id }); },
   async reqUnsoldout(d) { if (await run(() => q(sb.from('products').update({ soldout: false, updated_at: new Date().toISOString() }).eq('id', d.id)), '일시 품절을 풀었어요. 이 품목 요청은 입고 완료됐어요')) { closeModal(); reload('products', 'reqs'); } },
-  reqToProduct() { const r = S.reqs.get(M.data.id); if (!r) return; closeModal(); A.newProduct(); Object.assign(M.draft, { name: r.name, spec: r.spec || '', maker: r.maker || '' }); renderModal(); },
+  reqToProduct() { const r = S.reqs.get(M.data.id); if (!r) return; closeModal(); A.newProduct(); Object.assign(M.draft, { name: r.name, spec: r.spec || '', maker: r.maker || '', code: r.ext_code || '' }); renderModal(); },
+  drugDetail(d) { openDrug(d.seq); },
+  drugOf(d) { openDrug(null, d.id); },
+  drugMore() { S.ui.drugMore = true; render(); },
+  drugTest() { S.drugCache.delete(String(S.ui.drugTestQ || '').replace(/\s+/g, ' ').trim()); runDrug(S.ui.drugTestQ, 'test'); },
+  drugCheck() { S.drugOn = null; render(); loadDrugStatus(true); },
+  drugAdd(d) {
+    const p = S.products.get(d.id); if (!p || !orderable(p) || !S.myAccount) return; const key = S.myAccount.id; const step = Math.max(1, num(p.step) || 1);
+    setQty(key, p.id, (cartOf(key).lines[p.id] || 0) + step); closeModal(); toast(`${p.name} ${step}${p.unit || ''}를 담았어요. 수량은 장바구니에서 바꿀 수 있어요`, 'ok'); render();
+  },
+  reqDrug(d) {
+    const x = findDrug(d.seq); if (!x) return;
+    openModal('stockReq', { ext: { seq: x.seq, code: (x.edi || [])[0] || '', name: x.name, company: x.company } }, { name: x.name, spec: String(x.strength || '').slice(0, 60), maker: x.company || '', qty: '', memo: '' });
+  },
+  newFromDrug(d) {
+    const x = findDrug(d.seq); if (!x) return; closeModal(); A.newProduct();
+    Object.assign(M.draft, { name: x.name, spec: String(x.strength || '').slice(0, 60), maker: x.company || '', code: (x.edi || [])[0] || '' }); renderModal();
+  },
   shopChip(d) { S.ui.shopChip = d.c; render(); },
   fav(d) { S.favs.has(d.id) ? S.favs.delete(d.id) : S.favs.add(d.id); LS.set('favs', [...S.favs]); render(); },
   qty(d) { const c = cartOf(d.key); setQty(d.key, d.id, (c.lines[d.id] || 0) + num(d.d)); render(); },
@@ -1285,7 +1427,7 @@ document.addEventListener('input', e => {
     if (el.dataset.live != null) renderModal();
     return;
   }
-  if (el.dataset.bind != null) { setPath(S.ui, el.dataset.bind, val); if (el.dataset.norender == null) schedule(); return; }
+  if (el.dataset.bind != null) { setPath(S.ui, el.dataset.bind, val); if (el.dataset.bind === 'shopQ') drugSoon('shop'); if (el.dataset.norender == null) schedule(); return; }
   if (el.dataset.cartqty != null) { setQty(el.dataset.key, el.dataset.cartqty, val); schedule(); return; }
   if (el.dataset.cart != null) { const c = cartOf(el.dataset.key); c[el.dataset.cart] = val; saveCart(el.dataset.key); }
 });
