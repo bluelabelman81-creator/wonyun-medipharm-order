@@ -216,7 +216,7 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 .shop{display:grid;grid-template-columns:minmax(0,1fr) 352px;gap:28px;align-items:start}
 .shop-tools{display:grid;gap:14px}
 .plist{background:var(--sheet);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
-.prow{display:grid;grid-template-columns:24px minmax(0,1fr) 124px 84px 144px;grid-template-areas:"fav info price stock qty";align-items:center;gap:10px 16px;padding:15px 20px;border-bottom:1px solid var(--rule);transition:background .15s}
+.prow{display:grid;grid-template-columns:24px minmax(0,1fr) 124px 96px 144px;grid-template-areas:"fav info price stock qty";align-items:center;gap:10px 16px;padding:15px 20px;border-bottom:1px solid var(--rule);transition:background .15s}
 .prow:last-child{border-bottom:0}
 .prow.in{background:color-mix(in srgb,var(--gold-tint) 55%,var(--sheet))}
 .fav{grid-area:fav;width:24px;height:24px;border:0;background:transparent;color:var(--rule-2);cursor:pointer;border-radius:4px;padding:3px;display:grid;place-items:center}
@@ -231,7 +231,22 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 .pprice b{font-size:16px;font-weight:600}
 .pprice .u{font-size:12.5px;color:var(--ink-3);margin-left:1px}
 .pprice s{display:block;font-size:12px;color:var(--ink-3)}
-.pstock{grid-area:stock;text-align:center}
+.pstock{grid-area:stock;display:grid;justify-items:start;gap:1px}
+/* 주문 가능 여부: 점 + 글자 */
+.avail{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;white-space:nowrap}
+.avail::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.avail.ok{color:var(--ok)} .avail.low{color:var(--warn)} .avail.out{color:var(--bad)}
+.pstock small{font-size:12px;color:var(--ink-3);padding-left:13px;white-space:nowrap}
+.prow.out .pname{color:var(--ink-2)}
+.prow.out .pprice b{color:var(--ink-3)}
+.pact{grid-area:qty;justify-self:end;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right}
+.pact .s{font-size:12px;color:var(--ink-3)}
+.reqline{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;padding:14px 18px;border:1px dashed var(--rule-2);border-radius:6px;color:var(--ink-2);font-size:14px;background:var(--sheet)}
+.rq-memo{margin-top:6px;font-size:13.5px;color:var(--ink)}
+.rq-memo .muted{margin-right:6px}
+.cl.out .cl-n{color:var(--ink-3)}
+.cl.out .tag{justify-self:end}
+.ctabs .cnt{margin-left:6px;vertical-align:1px}
 .qty{grid-area:qty;display:flex;justify-self:end;height:36px;border:1px solid var(--rule-2);border-radius:4px;overflow:hidden;background:var(--sheet)}
 .qty button{width:34px;border:0;background:transparent;color:var(--ink-2);font-size:17px;cursor:pointer;line-height:1}
 .qty button:hover{background:var(--sunken);color:var(--ink)}
@@ -396,6 +411,6 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 <noscript><p style="padding:24px">자바스크립트를 켜야 주문 사이트를 쓸 수 있어요.</p></noscript>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
