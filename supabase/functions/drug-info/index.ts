@@ -1,5 +1,6 @@
 // 원윤메디팜 주문관리 — 식약처 의약품 정보 조회 (공공데이터포털). 로그인한 거래처·관리자만.
 // 필요한 비밀값: DATA_GO_KR_KEY (공공데이터포털 일반 인증키. Decoding 키 권장, Encoding 키도 됨)
+//   Supabase 비밀값이 없으면 app_secrets 표(서버만 읽음)의 같은 이름 값을 씀
 // 쓰는 API: 의약품 제품 허가정보(필수) · 의약품개요정보 e약은요(선택) · 의약품 낱알식별(선택)
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
 import { PRODUCT_EP, EASY_EP, PILL_EP, extractItems, merge, brief, mapProduct, normName, str, type DrugFull } from './lib.ts';
@@ -19,11 +20,19 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const SEARCH_TTL = 7 * 24 * 3600 * 1000;   // 검색 결과 7일 보관
 const ITEM_TTL = 30 * 24 * 3600 * 1000;    // 품목 상세 30일 보관
 
-function apiKey(): string | null { const k = (Deno.env.get('DATA_GO_KR_KEY') || '').trim(); return k || null; }
+let keyCache: { v: string; at: number } | null = null;
+// deno-lint-ignore no-explicit-any
+async function apiKey(db: any): Promise<string | null> {
+  const env = (Deno.env.get('DATA_GO_KR_KEY') || '').trim();
+  if (env) return env;
+  if (keyCache && Date.now() - keyCache.at < 60_000) return keyCache.v || null;
+  const { data } = await db.from('app_secrets').select('value').eq('name', 'DATA_GO_KR_KEY').maybeSingle();
+  keyCache = { v: String(data?.value || '').trim(), at: Date.now() };
+  return keyCache.v || null;
+}
 const keyParam = (k: string) => (k.includes('%') ? k : encodeURIComponent(k));
 
-async function call(ep: string, params: Record<string, string | number>): Promise<{ items: Record<string, unknown>[]; total: number }> {
-  const k = apiKey()!;
+async function call(k: string, ep: string, params: Record<string, string | number>): Promise<{ items: Record<string, unknown>[]; total: number }> {
   const qs = Object.entries(params).map(([a, b]) => `${a}=${encodeURIComponent(String(b))}`).join('&');
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 9000);
   try {
@@ -59,8 +68,9 @@ Deno.serve(async (req) => {
   const isAdmin = me.role === 'admin';
 
   const action = str(body.action);
-  if (action === 'status') return json({ hasKey: !!apiKey() });
-  if (!apiKey()) return json({ needsKey: true, items: [], total: 0 });
+  const key = await apiKey(db);
+  if (action === 'status') return json({ hasKey: !!key });
+  if (!key) return json({ needsKey: true, items: [], total: 0 });
 
   try {
     if (action === 'search') {
@@ -71,9 +81,9 @@ Deno.serve(async (req) => {
       if (hit && Date.now() - new Date(hit.fetched_at).getTime() < SEARCH_TTL) return json({ ...hit.data, cached: true });
 
       const [p, e, g] = await Promise.allSettled([
-        call(PRODUCT_EP, { item_name: q, numOfRows: 20, pageNo: 1 }),
-        call(EASY_EP, { itemName: q, numOfRows: 20, pageNo: 1 }),
-        call(PILL_EP, { item_name: q, numOfRows: 30, pageNo: 1 }),
+        call(key, PRODUCT_EP, { item_name: q, numOfRows: 20, pageNo: 1 }),
+        call(key, EASY_EP, { itemName: q, numOfRows: 20, pageNo: 1 }),
+        call(key, PILL_EP, { item_name: q, numOfRows: 30, pageNo: 1 }),
       ]);
       if (p.status === 'rejected' && e.status === 'rejected') throw p.reason;
       const full = merge(p.status === 'fulfilled' ? p.value.items : [], e.status === 'fulfilled' ? e.value.items : [], g.status === 'fulfilled' ? g.value.items : []);
@@ -97,9 +107,9 @@ Deno.serve(async (req) => {
       const { data: hit } = await db.from('drug_cache').select('data, fetched_at').eq('key', ck).maybeSingle();
       if (hit && Date.now() - new Date(hit.fetched_at).getTime() < ITEM_TTL) return json({ item: hit.data, cached: true });
       const [p, e, g] = await Promise.allSettled([
-        call(PRODUCT_EP, { item_seq: seq, numOfRows: 1, pageNo: 1 }),
-        call(EASY_EP, { itemSeq: seq, numOfRows: 1, pageNo: 1 }),
-        call(PILL_EP, { item_seq: seq, numOfRows: 1, pageNo: 1 }),
+        call(key, PRODUCT_EP, { item_seq: seq, numOfRows: 1, pageNo: 1 }),
+        call(key, EASY_EP, { itemSeq: seq, numOfRows: 1, pageNo: 1 }),
+        call(key, PILL_EP, { item_seq: seq, numOfRows: 1, pageNo: 1 }),
       ]);
       const list = merge(p.status === 'fulfilled' ? p.value.items : [], e.status === 'fulfilled' ? e.value.items : [], g.status === 'fulfilled' ? g.value.items : []);
       const item: DrugFull | undefined = list.find(d => d.seq === seq) || list[0];
@@ -116,7 +126,7 @@ Deno.serve(async (req) => {
       const ck = 'm:' + (code || '') + ':' + name.toLowerCase();
       const { data: hit } = await db.from('drug_cache').select('data, fetched_at').eq('key', ck).maybeSingle();
       if (hit && Date.now() - new Date(hit.fetched_at).getTime() < ITEM_TTL) return json({ ...hit.data, cached: true });
-      const { items } = await call(PRODUCT_EP, { item_name: name, numOfRows: 20, pageNo: 1 });
+      const { items } = await call(key, PRODUCT_EP, { item_name: name, numOfRows: 20, pageNo: 1 });
       const full = items.map(mapProduct).filter(d => d.seq && d.status === '정상');
       // 보험코드가 같으면 확실, 아니면 이름(괄호 속 성분 제외)이 똑같을 때만 — 함량이 다른 품목으로 잘못 잇지 않게
       const hitd = (code && full.find(d => d.edi.includes(code.padStart(9, '0')))) || full.find(d => normName(d.name) === normName(name)) || null;
