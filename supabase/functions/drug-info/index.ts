@@ -114,7 +114,8 @@ Deno.serve(async (req) => {
       const list = merge(p.status === 'fulfilled' ? p.value.items : [], e.status === 'fulfilled' ? e.value.items : [], g.status === 'fulfilled' ? g.value.items : []);
       const item: DrugFull | undefined = list.find(d => d.seq === seq) || list[0];
       if (!item) return json({ error: p.status === 'rejected' ? (p.reason as Error).message : '식약처 자료에서 찾지 못했어요' }, 404);
-      await db.from('drug_cache').upsert({ key: ck, data: item, fetched_at: new Date().toISOString() });
+      // 허가정보를 못 받은 때(식약처 응답 지연 등)의 반쪽 자료는 저장하지 않음 → 다음에 다시 시도
+      if (p.status === 'fulfilled') await db.from('drug_cache').upsert({ key: ck, data: item, fetched_at: new Date().toISOString() });
       return json({ item });
     }
 

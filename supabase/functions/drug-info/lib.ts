@@ -1,7 +1,7 @@
 // 식약처 공공데이터(공공데이터포털) 응답 → 사이트에서 쓰는 형태로 정리하는 함수 모음.
 // 네트워크를 쓰지 않는 순수 함수라서 실제 응답 샘플로 바로 시험할 수 있다.
 
-export const PRODUCT_EP = 'https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnDtlInq06'; // 제품 허가정보 상세
+export const PRODUCT_EP = 'https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService08/getDrugPrdtPrmsnDtlInq08'; // 제품 허가정보 상세 (2026-09 개정판, 07판은 새 키로 못 씀)
 export const EASY_EP = 'https://apis.data.go.kr/1471000/DrbEasyDrugInfoService/getDrbEasyDrugList'; // e약은요
 export const PILL_EP = 'https://apis.data.go.kr/1471000/MdcinGrnIdntfcInfoService03/getMdcinGrnIdntfcInfoList03'; // 낱알식별
 
