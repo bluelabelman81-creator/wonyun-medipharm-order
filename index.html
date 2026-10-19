@@ -137,6 +137,8 @@ textarea.inp{min-height:76px;resize:vertical;line-height:1.5}
 .seg button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--gold)}
 .seg button .c{margin-left:6px;font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;font-weight:500}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
+.xl-acts{display:flex;flex-wrap:wrap;gap:8px}
 .chip{border:1px solid var(--rule-2);background:transparent;color:var(--ink-2);padding:6px 14px;border-radius:999px;font-weight:500;font-size:13.5px;cursor:pointer;white-space:nowrap}
 .chip:hover{border-color:var(--ink-3)}
 .chip.on{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
@@ -440,9 +442,10 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 <div id="modal"></div>
 <div id="toast" class="toasts" role="status" aria-live="polite"></div>
 <input type="file" id="xlsx-in" accept=".xlsx,.xls,.csv" hidden>
+<input type="file" id="order-xlsx-in" accept=".xlsx,.xls,.csv" hidden>
 <noscript><p style="padding:24px">자바스크립트를 켜야 주문 사이트를 쓸 수 있어요.</p></noscript>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

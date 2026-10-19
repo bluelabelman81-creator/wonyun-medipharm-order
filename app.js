@@ -692,7 +692,8 @@ function shopView(ctx) {
       <div class="shop-tools">
         <div class="row"><div class="search" style="max-width:none"><label class="sr" for="shopQ">품목 검색</label><input class="inp" id="shopQ" data-bind="shopQ" value="${esc(S.ui.shopQ)}" placeholder="제품명·성분·보험코드로 찾기" autocomplete="off"></div>
           <label class="sr" for="shopGroup">효능군</label><select class="inp" id="shopGroup" data-bind="shopGroup" style="width:auto;max-width:220px"><option value="">효능군 전체</option>${groups.map(g => opt(g, S.ui.shopGroup)).join('')}</select></div>
-        <div class="chips">${chips.map(c => `<button class="chip${chip === c ? ' on' : ''}" data-act="shopChip" data-c="${c}">${c}</button>`).join('')}</div>
+        <div class="chips-row"><div class="chips">${chips.map(c => `<button class="chip${chip === c ? ' on' : ''}" data-act="shopChip" data-c="${c}">${c}</button>`).join('')}</div>
+          <div class="xl-acts"><button class="btn sm ghost" data-act="orderTemplate">주문서 양식 받기</button><button class="btn sm" data-act="orderXlsx">엑셀로 담기</button></div></div>
       </div>
       ${items.length ? `<div class="plist${custPrices() ? '' : ' noprice'}">${rows}</div>` : `<div class="panel"><div class="empty"><b>${emptyMsg[0]}</b>${emptyMsg[1]}${qq ? `<div style="margin-top:14px">${reqCta}</div>` : ''}</div></div>`}
       ${qq ? drugPanel('shop') : ''}
@@ -933,6 +934,17 @@ const MODALS = {
     const body = `<div class="fgrid">${msel('거래처', 'account_id', [['', '거래처 선택'], ...accs.map(a => [a.id, a.name])], { live: true })}${mf('입금일', 'date', { type: 'date' })}${mf('금액 (원)', 'amount', { num: true, req: true, af: true })}${msel('방법', 'method', PAY_METHODS)}${mf('메모', 'memo', { full: true, ph: '예: 9월분' })}</div>${b != null ? `<p class="hint">현재 미수 잔액 ${won(b)}원</p>` : ''}`;
     return frame('입금 등록', '', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="savePayment"${busyAttr()}>등록</button>`);
   },
+  orderx() {
+    const r = M.data; const inCart = Object.keys(cartOf(custCtx().account_id).lines).length;
+    const u = p => esc(p.unit || '개');
+    const okRows = r.ok.map(a => `<tr><td><div class="t">${esc(a.p.name)}</div><div class="s">${esc(a.p.spec || '')}</div></td><td class="num nowrap"><b>${won(a.qty)}</b>${u(a.p)}</td><td class="s">${a.adj ? `주문 단위(${won(a.p.step)}${u(a.p)})에 맞춰 ${won(a.want)} → ${won(a.qty)}` : ''}${a.how === 'part' ? `${a.adj ? '<br>' : ''}<span class="tag warn">이름 일부로 찾음</span> 맞는지 확인해 주세요` : ''}</td></tr>`).join('');
+    const body = `<div class="note info">${esc(r.file)} · 담을 품목 ${r.ok.length}개${r.out.length ? ` · 품절 ${r.out.length}개` : ''}${r.miss.length ? ` · 못 찾은 품목 ${r.miss.length}개` : ''}</div>
+      ${r.ok.length ? `<div class="tbl-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th>품목</th><th class="num">수량</th><th>확인할 점</th></tr></thead><tbody>${okRows}</tbody></table></div>` : ''}
+      ${r.out.length ? `<div class="stack" style="gap:6px"><div class="sec-t">품절이라 담지 않아요</div><ul class="list panel">${r.out.map(a => `<li class="li"><div class="li-main"><div class="li-t">${esc(a.p.name)}</div><div class="li-s">${won(a.qty)}${u(a.p)}${myOpenReq(a.p.id) ? ' · 재고 요청함' : ''}</div></div></li>`).join('')}</ul><p class="hint">주문하기 화면에서 이 품목의 '재고 요청'을 누르면 입고될 때 알려 드려요.</p></div>` : ''}
+      ${r.miss.length ? `<div class="stack" style="gap:6px"><div class="sec-t">목록에서 못 찾은 품목</div><ul class="list panel">${r.miss.map(m => `<li class="li"><div class="li-main" style="white-space:normal"><div class="li-t" style="white-space:normal">${esc(m.name)}${m.spec ? ` <span class="muted">${esc(m.spec)}</span>` : ''} · ${won(m.qty)}</div>${m.cands.length ? `<div class="li-s" style="white-space:normal">비슷한 품목: ${m.cands.map(esc).join(', ')}</div>` : ''}</div></li>`).join('')}</ul><p class="hint">제품명을 목록과 똑같이 고쳐 다시 올리거나, 주문하기에서 찾아 직접 담아 주세요. 취급하지 않는 약품은 '약품 보유 요청'을 남길 수 있어요.</p></div>` : ''}
+      ${inCart && r.ok.length ? mchk('지금 장바구니에 담긴 품목은 비우고 담기', 'clear') : ''}`;
+    return frame('엑셀 주문서 확인', '수량을 확인하고 장바구니에 담아요. 주문 접수는 장바구니에서 해요.', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="applyOrderXlsx"${r.ok.length ? '' : ' disabled'}>${r.ok.length}품목 장바구니에 담기</button>`);
+  },
   importx() {
     const d = M.draft; const res = M.data;
     const upd = res.items.filter(x => x.match).length, add = res.items.length - upd;
@@ -1063,6 +1075,15 @@ const A = {
   toggleOpen(d) { S.ui.open[d.id] = !S.ui.open[d.id]; render(); },
   reloadPage() { location.reload(); },
   async logout() { try { await sb.auth.signOut(); } catch {} location.reload(); },
+  orderTemplate() { exportOrderTemplate(); },
+  orderXlsx() { if (!window.XLSX) return toast('엑셀 도구를 불러오지 못했어요. 새로 고쳐 주세요', 'bad'); const el = document.getElementById('order-xlsx-in'); el.value = ''; el.click(); },
+  applyOrderXlsx() {
+    const r = M.data; if (!r || !r.ok.length) return; const key = custCtx().account_id; const c = cartOf(key);
+    if (M.draft.clear) c.lines = {};
+    for (const a of r.ok) c.lines[a.pid] = a.qty;
+    saveCart(key); closeModal(); S.cview = 'shop'; render();
+    toast(`${r.ok.length}품목을 장바구니에 담았어요. 확인 후 주문 접수해 주세요`, 'ok');
+  },
   reorder(d) {
     const o = S.orders.get(d.id); if (!o || !S.myAccount) return; let n = 0, miss = 0; const key = S.myAccount.id;
     for (const l of o.lines || []) { const p = S.products.get(l.pid); if (p && p.active !== false) { setQty(key, l.pid, num(l.oqty ?? l.qty) || num(l.qty)); n++; } else miss++; }
@@ -1349,6 +1370,64 @@ document.getElementById('xlsx-in').addEventListener('change', e => {
       const res = parseRows(rows, f.name); if (res.error) return toast(res.error, 'bad');
       const mm = f.name.match(/(20\d{2})[_.\-\s년]*(\d{1,2})/); const month = mm ? `${mm[1]}-${pad(+mm[2])}` : thisMonth();
       openModal('importx', res, { month, kind: '의약품' }, { size: 'wide' });
+    } catch (err) { console.warn(err); toast('엑셀 파일을 읽지 못했어요', 'bad'); }
+  };
+  rd.readAsArrayBuffer(f);
+});
+/* 거래처 엑셀 주문: 양식 내려받기 · 올려서 장바구니 채우기 */
+function exportOrderTemplate() {
+  const ctx = custCtx(); const withPrice = custPrices();
+  const list = products().filter(p => p.active !== false).sort((a, b) => ko(a.kind || '의약품', b.kind || '의약품') || ko(a.name, b.name));
+  const head = ['보험코드', '제품명', '규격', '단위', '주문 단위', ...(withPrice ? ['단가'] : []), '수량', '비고'];
+  const rows = [head, ...list.map(p => [p.code || '', p.name, p.spec || '', p.unit || '개', Math.max(1, num(p.step) || 1), ...(withPrice ? [priceFor(p, ctx)] : []), '', orderable(p) ? '' : '품절'])];
+  const guide = [['원윤메디팜 주문서 작성 방법'], [''],
+    ['1. 「주문서」 시트의 「수량」 칸에 주문할 수량만 적어 주세요. 빈 칸은 주문하지 않아요.'],
+    ['2. 「주문 단위」가 100이면 100, 200처럼 그 배수로 주문돼요. 배수가 아니면 올림해서 담겨요.'],
+    ['3. 목록에 없는 약품은 맨 아래 줄에 제품명과 수량을 적어 주세요. 올리면 「못 찾은 품목」으로 알려 드려요.'],
+    ['4. 사이트 주문하기 → 「엑셀로 담기」로 올리면 장바구니에 담겨요. 확인한 뒤 「주문 접수하기」를 눌러야 주문돼요.'], [''],
+    ['보험코드나 제품명으로 품목을 찾아요. 다른 곳에서 쓰던 엑셀도 「제품명」(또는 보험코드)과 「수량」 칸이 있으면 올릴 수 있어요.']];
+  saveXlsx(`원윤메디팜_주문서_${today().replace(/-/g, '')}.xlsx`, [{ name: '주문서', rows, cols: [12, 46, 24, 6, 9, ...(withPrice ? [9] : []), 8, 8] }, { name: '작성 방법', rows: guide, cols: [110] }]);
+}
+function parseOrderRows(rows) {
+  const cl = v => String(v ?? '').replace(/\s/g, '');
+  const NAME = ['제품명', '품목명', '약품명', '상품명', '약제명', '품명', '제품', '품목', '적요'], CODE = ['보험코드', '코드', 'EDI', 'EDI코드', '보험코드(EDI)', '제품코드', '약품코드'], QTY = ['수량', '주문수량', '발주수량', '요청수량', '주문량'];
+  const hi = rows.findIndex(r => Array.isArray(r) && r.some(c => QTY.includes(cl(c))) && r.some(c => NAME.includes(cl(c)) || CODE.includes(cl(c))));
+  if (hi < 0) return { error: '「제품명」(또는 보험코드)과 「수량」 칸이 있는 제목 줄을 찾지 못했어요. 「주문서 양식 받기」로 받은 양식을 써 주세요.' };
+  const H = rows[hi].map(cl); const col = list => H.findIndex(h => list.includes(h));
+  const c = { name: col(NAME), code: col(CODE), spec: col(['규격']), qty: col(QTY) };
+  const act = products().filter(p => p.active !== false);
+  const byCode = new Map(); for (const p of act) if (p.code) byCode.set(normCode(p.code), p);
+  const byName = new Map(); for (const p of act) { const k = normN(p.name); if (!byName.has(k)) byName.set(k, []); byName.get(k).push(p); }
+  const agg = new Map(); const miss = [];
+  for (const r of rows.slice(hi + 1)) {
+    if (!Array.isArray(r)) continue;
+    const name = c.name >= 0 ? String(r[c.name] ?? '').trim() : ''; const code = c.code >= 0 ? normCode(r[c.code]) : ''; const spec = c.spec >= 0 ? String(r[c.spec] ?? '').trim() : '';
+    const qty = Math.floor(num(String(r[c.qty] ?? '').replace(/[^\d.]/g, '')));
+    if (!(qty > 0) || (!name && !code)) continue;
+    let p = (code && byCode.get(code)) || null; let how = p ? 'code' : ''; let cands = [];
+    if (!p && name) {
+      const k = normN(name); cands = byName.get(k) || [];
+      if (cands.length > 1 && spec) { const f = cands.filter(x => normN(x.spec) === normN(spec)); if (f.length) cands = f; }
+      if (cands.length === 1) { p = cands[0]; how = 'name'; }
+      else if (!cands.length && k.length >= 3) { const part = act.filter(x => { const n = normN(x.name); return n.includes(k) || k.includes(n); }); if (part.length === 1) { p = part[0]; how = 'part'; } else cands = part; }
+    }
+    if (!p) { miss.push({ name: name || code, spec, qty, cands: cands.slice(0, 4).map(x => x.name) }); continue; }
+    const a = agg.get(p.id) || { pid: p.id, p, want: 0, how }; a.want += qty; if (how === 'part') a.how = 'part'; agg.set(p.id, a);
+  }
+  const ok = [], out = [];
+  for (const a of agg.values()) { const step = Math.max(1, num(a.p.step) || 1); a.qty = Math.ceil(a.want / step) * step; a.adj = a.qty !== a.want; (orderable(a.p) ? ok : out).push(a); }
+  if (!ok.length && !out.length && !miss.length) return { error: '수량이 적힌 줄이 없어요. 「수량」 칸에 주문할 수량을 적어 주세요.' };
+  return { ok, out, miss };
+}
+document.getElementById('order-xlsx-in').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array' }); let res = null;
+      for (const n of wb.SheetNames) { const r = parseOrderRows(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null })); if (!r.error) { res = r; break; } res = res || r; }
+      if (!res || res.error) return toast((res && res.error) || '엑셀 파일을 읽지 못했어요', 'bad');
+      openModal('orderx', { ...res, file: f.name }, { clear: false }, { live: true, size: 'wide' });
     } catch (err) { console.warn(err); toast('엑셀 파일을 읽지 못했어요', 'bad'); }
   };
   rd.readAsArrayBuffer(f);
