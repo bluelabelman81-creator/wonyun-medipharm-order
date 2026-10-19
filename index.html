@@ -219,6 +219,7 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 .shop-tools{display:grid;gap:14px}
 .plist{background:var(--sheet);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
 .prow{display:grid;grid-template-columns:24px minmax(0,1fr) 124px 96px 144px;grid-template-areas:"fav info price stock qty";align-items:center;gap:10px 16px;padding:15px 20px;border-bottom:1px solid var(--rule);transition:background .15s}
+.plist.noprice .prow{grid-template-columns:24px minmax(0,1fr) 96px 144px;grid-template-areas:"fav info stock qty"}
 .prow:last-child{border-bottom:0}
 .prow.in{background:color-mix(in srgb,var(--gold-tint) 55%,var(--sheet))}
 .fav{grid-area:fav;width:24px;height:24px;border:0;background:transparent;color:var(--rule-2);cursor:pointer;border-radius:4px;padding:3px;display:grid;place-items:center}
@@ -413,6 +414,7 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 }
 @media (max-width:640px){
   .prow{grid-template-columns:24px minmax(0,1fr) auto;grid-template-areas:"fav info info" "fav price qty" "fav stock qty";padding:14px 16px}
+  .plist.noprice .prow{grid-template-columns:24px minmax(0,1fr) auto;grid-template-areas:"fav info info" "fav stock qty"}
   .pprice{text-align:left;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
   .pprice s{display:inline}
   .pstock{text-align:left}
@@ -441,6 +443,6 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 <noscript><p style="padding:24px">자바스크립트를 켜야 주문 사이트를 쓸 수 있어요.</p></noscript>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

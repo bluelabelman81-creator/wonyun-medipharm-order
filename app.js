@@ -299,6 +299,7 @@ function availTag(p) {
   return '<span class="avail ok">주문 가능</span>';
 }
 const vatIncl = () => S.settings.vat_included !== false;
+const custPrices = () => S.settings.show_prices === true; // 거래처 화면에 금액을 보일지 (관리자 설정)
 function vatSplit(total) { total = Math.round(num(total)); if (vatIncl()) { const supply = Math.round(total / 1.1); return { supply, vat: total - supply, sum: total }; } const vat = Math.round(total * 0.1); return { supply: total, vat, sum: total + vat }; }
 function priceFor(p, ctx) { const sp = ctx?.special?.[p.id]; if (sp != null && sp !== '') return num(sp); const d = num(ctx?.discount); return Math.round(num(p.price) * (1 - d / 100)); }
 const sumLines = ls => ls.reduce((a, l) => a + num(l.qty) * num(l.price), 0);
@@ -624,6 +625,7 @@ function settingsView() {
       ${f('주문 마감 안내', 'cutoff', '예: 오후 3시 전 주문 당일 출고')}
       <label class="fld full" for="set-notice"><span>공지</span><textarea class="inp" id="set-notice" data-bind="setd.notice" data-norender placeholder="예: 추석 연휴 배송 일정 안내">${esc(d.notice || '')}</textarea></label>
       <label class="check full"><input type="checkbox" id="set-vat" data-bind="setd.vat_included" data-norender${d.vat_included !== false ? ' checked' : ''}> 판매가에 부가세가 포함되어 있어요 (계산서에서 공급가액·세액을 나눠 계산)</label>
+      <label class="check full"><input type="checkbox" id="set-showp" data-bind="setd.show_prices" data-norender${d.show_prices === true ? ' checked' : ''}> 거래처 화면에 가격·금액 보이기 <span class="muted">(끄면 주문하기·장바구니·주문내역·세금계산서 목록에서 금액을 숨기고, 거래명세서 내려받기도 막아요)</span></label>
     </div></div></section>
     <section class="panel"><div class="panel-h"><h2>세금계산서 연동 (볼타)</h2><button class="btn sm ghost" data-act="taxStatus">상태 새로 고침</button></div>
       <ol class="list" style="padding:0">
@@ -652,7 +654,7 @@ function customerView() {
   const tabs = [['shop', '주문하기' + (cartCount(a.id) ? ` (${cartCount(a.id)})` : '')], ['history', '주문내역'], ['reqs', '재고 요청' + (nr ? `<span class="cnt">${nr}</span>` : '')], ['invoices', '세금계산서'], ['me', '내 정보']];
   const n = S.settings.notice || S.settings.cutoff;
   const body = v === 'history' ? historyView(ctx) : v === 'reqs' ? custReqsView() : v === 'invoices' ? custInvoicesView() : v === 'me' ? meView() : shopView(ctx);
-  return `<div class="cshell"><header class="ctop"><div class="ctop-in">${brand('거래처 주문')}<nav class="ctabs">${tabs.map(([k, l]) => `<button class="${v === k ? 'on' : ''}" data-act="cview" data-v="${k}">${l}</button>`).join('')}</nav><div class="ctop-who"><span class="muted">거래처</span> <b>${esc(a.name)}</b>${num(a.discount) ? ` <span class="tag gold">할인 ${num(a.discount)}%</span>` : ''}<button class="btn sm ghost" data-act="logout">로그아웃</button></div></div></header>
+  return `<div class="cshell"><header class="ctop"><div class="ctop-in">${brand('거래처 주문')}<nav class="ctabs">${tabs.map(([k, l]) => `<button class="${v === k ? 'on' : ''}" data-act="cview" data-v="${k}">${l}</button>`).join('')}</nav><div class="ctop-who"><span class="muted">거래처</span> <b>${esc(a.name)}</b>${custPrices() && num(a.discount) ? ` <span class="tag gold">할인 ${num(a.discount)}%</span>` : ''}<button class="btn sm ghost" data-act="logout">로그아웃</button></div></div></header>
     <main class="cmain${v === 'shop' && cartCount(a.id) ? ' has-cartbar' : ''}">${n && v === 'shop' ? `<div class="banner">${S.settings.notice ? `<span><b>공지</b> ${esc(S.settings.notice)}</span>` : ''}${S.settings.cutoff ? `<span><b>마감</b> ${esc(S.settings.cutoff)}</span>` : ''}</div>` : ''}${body}</main></div>`;
 }
 function shopView(ctx) {
@@ -676,7 +678,7 @@ function shopView(ctx) {
     const qv = cart.lines[p.id] || 0; const pr = priceFor(p, ctx); const step = Math.max(1, num(p.step) || 1); const ok = orderable(p); const rq = ok ? null : myOpenReq(p.id);
     return `<div class="prow${qv && ok ? ' in' : ''}${ok ? '' : ' out'}"><button class="fav${S.favs.has(p.id) ? ' on' : ''}" data-act="fav" data-id="${esc(p.id)}" aria-label="${esc(p.name)} 즐겨찾기" aria-pressed="${S.favs.has(p.id)}">${STAR}</button>
       <div class="pinfo"><div class="pname">${esc(p.name)}</div><div class="pmeta">${p.spec ? `<span>${esc(p.spec)}</span>` : ''}${p.code ? `<span class="mono">${esc(p.code)}</span>` : ''}${p.grp ? `<span>${esc(p.grp)}</span>` : ''}${step > 1 ? `<span>${step}${esc(p.unit || '')} 단위</span>` : ''}${S.drugOn && (p.kind || '의약품') === '의약품' ? `<button class="plink" data-act="drugOf" data-id="${esc(p.id)}">약품 정보</button>` : ''}</div></div>
-      <div class="pprice"><span><b>${won(pr)}</b><span class="u">원/${esc(p.unit || '개')}</span></span>${pr !== num(p.price) ? `<s>${won(p.price)}원</s>` : ''}</div>
+      ${custPrices() ? `<div class="pprice"><span><b>${won(pr)}</b><span class="u">원/${esc(p.unit || '개')}</span></span>${pr !== num(p.price) ? `<s>${won(p.price)}원</s>` : ''}</div>` : ''}
       <div class="pstock">${availTag(p)}</div>
       ${ok ? `<div class="qty"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="-${step}" aria-label="${esc(p.name)} 수량 빼기">−</button><input id="q-${esc(p.id)}" inputmode="numeric" autocomplete="off" data-cartqty="${esc(p.id)}" data-key="${esc(key)}" value="${qv || ''}" placeholder="0" aria-label="${esc(p.name)} 주문 수량"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="${step}" aria-label="${esc(p.name)} 수량 더하기">+</button></div>` : rq ? `<div class="pact"><span class="tag gold">재고 요청함</span><span class="s">${fmtD(rq.created_at)} ${RQ[rq.status][1]}</span></div>` : `<div class="pact"><button class="btn sm" data-act="reqStock" data-id="${esc(p.id)}">재고 요청</button></div>`}</div>`;
   }).join('');
@@ -686,13 +688,13 @@ function shopView(ctx) {
   return `<div class="shop">
     <div class="stack" style="gap:12px;min-width:0">
       ${arrived.length ? `<div class="note ok"><b>재고 요청하신 품목이 입고됐어요</b>${esc(arrived[0].name)}${arrived.length > 1 ? ` 외 ${arrived.length - 1}건` : ''} <button class="btn sm" data-act="cview" data-v="reqs">확인하기</button></div>` : ''}
-      ${last ? `<div class="again">${meta(`최근 주문 <b class="mono">${esc(last.no)}</b>`, fmtD(last.created_at), `${(last.lines || []).length}품목 ${won(last.total)}원`)}<button class="btn sm" data-act="reorder" data-id="${esc(last.id)}">그대로 다시 담기</button></div>` : ''}
+      ${last ? `<div class="again">${meta(`최근 주문 <b class="mono">${esc(last.no)}</b>`, fmtD(last.created_at), `${(last.lines || []).length}품목${custPrices() ? ` ${won(last.total)}원` : ''}`)}<button class="btn sm" data-act="reorder" data-id="${esc(last.id)}">그대로 다시 담기</button></div>` : ''}
       <div class="shop-tools">
         <div class="row"><div class="search" style="max-width:none"><label class="sr" for="shopQ">품목 검색</label><input class="inp" id="shopQ" data-bind="shopQ" value="${esc(S.ui.shopQ)}" placeholder="제품명·성분·보험코드로 찾기" autocomplete="off"></div>
           <label class="sr" for="shopGroup">효능군</label><select class="inp" id="shopGroup" data-bind="shopGroup" style="width:auto;max-width:220px"><option value="">효능군 전체</option>${groups.map(g => opt(g, S.ui.shopGroup)).join('')}</select></div>
         <div class="chips">${chips.map(c => `<button class="chip${chip === c ? ' on' : ''}" data-act="shopChip" data-c="${c}">${c}</button>`).join('')}</div>
       </div>
-      ${items.length ? `<div class="plist">${rows}</div>` : `<div class="panel"><div class="empty"><b>${emptyMsg[0]}</b>${emptyMsg[1]}${qq ? `<div style="margin-top:14px">${reqCta}</div>` : ''}</div></div>`}
+      ${items.length ? `<div class="plist${custPrices() ? '' : ' noprice'}">${rows}</div>` : `<div class="panel"><div class="empty"><b>${emptyMsg[0]}</b>${emptyMsg[1]}${qq ? `<div style="margin-top:14px">${reqCta}</div>` : ''}</div></div>`}
       ${qq ? drugPanel('shop') : ''}
       ${items.length && qq ? `<div class="reqline"><span>찾는 약품이 목록에 없나요? 원윤메디팜에 보유를 요청할 수 있어요.</span>${reqCta}</div>` : ''}
     </div>
@@ -704,13 +706,13 @@ function cartPanel(ctx) {
   const all = Object.entries(cart.lines).map(([pid, qv]) => { const p = S.products.get(pid); return p && p.active !== false ? { p, qty: qv, price: priceFor(p, ctx), ok: orderable(p) } : null; }).filter(Boolean);
   const lines = all.filter(l => l.ok); const outs = all.filter(l => !l.ok);
   const total = lines.reduce((a, l) => a + l.qty * l.price, 0); const v = vatSplit(total);
-  const bar = lines.length ? `<div class="cartbar"><span class="cb-t">${meta(`${lines.length}품목`, `${won(v.sum)}원`)}</span><button class="btn primary" data-act="toCart">장바구니 보기</button></div>` : '';
+  const bar = lines.length ? `<div class="cartbar"><span class="cb-t">${meta(`${lines.length}품목`, custPrices() ? `${won(v.sum)}원` : '')}</span><button class="btn primary" data-act="toCart">장바구니 보기</button></div>` : '';
   return `<aside class="cart" id="cart" aria-label="장바구니"><div class="cart-h"><h2>장바구니</h2><span class="muted">${lines.length}품목</span></div>
-    <div class="cart-lines" data-keep="cartl">${outs.map(l => `<div class="cl out"><span class="cl-n">${esc(l.p.name)}</span><span class="tag bad">품절</span><span class="cl-q">주문에서 빠져요</span><button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('')}${lines.length ? lines.map(l => `<div class="cl"><span class="cl-n">${esc(l.p.name)}</span><span class="cl-a">${won(l.qty * l.price)}</span><span class="cl-q">${won(l.qty)}${esc(l.p.unit || '')} × ${won(l.price)}원</span><button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('') : outs.length ? '' : `<div class="empty" style="padding:22px 16px">목록에서 수량을 입력하면<br>여기에 담겨요.</div>`}</div>
+    <div class="cart-lines" data-keep="cartl">${outs.map(l => `<div class="cl out"><span class="cl-n">${esc(l.p.name)}</span><span class="tag bad">품절</span><span class="cl-q">주문에서 빠져요</span><button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('')}${lines.length ? lines.map(l => `<div class="cl"><span class="cl-n">${esc(l.p.name)}</span>${custPrices() ? `<span class="cl-a">${won(l.qty * l.price)}</span><span class="cl-q">${won(l.qty)}${esc(l.p.unit || '')} × ${won(l.price)}원</span>` : `<span class="cl-a">${won(l.qty)}${esc(l.p.unit || '')}</span><span class="cl-q">${esc(l.p.spec || '')}</span>`}<button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('') : outs.length ? '' : `<div class="empty" style="padding:22px 16px">목록에서 수량을 입력하면<br>여기에 담겨요.</div>`}</div>
     <div class="cart-f">
       <label class="fld" for="cart-date"><span>희망 배송일</span><input class="inp" type="date" id="cart-date" data-cart="want_date" data-key="${esc(key)}" value="${esc(cart.want_date || '')}" min="${today()}"></label>
       <label class="fld" for="cart-memo"><span>요청사항</span><textarea class="inp" id="cart-memo" data-cart="memo" data-key="${esc(key)}" rows="2" placeholder="예: 오전 중 배송 부탁드려요">${esc(cart.memo || '')}</textarea></label>
-      <div class="sum">${vatIncl() ? `<div><span>공급가액</span><span>${won(v.supply)}원</span></div><div><span>부가세</span><span>${won(v.vat)}원</span></div>` : `<div><span>상품 금액</span><span>${won(v.supply)}원</span></div><div><span>부가세 (10%)</span><span>${won(v.vat)}원</span></div>`}<div class="tot"><span>합계</span><span>${won(v.sum)}원</span></div></div>
+      ${custPrices() ? `<div class="sum">${vatIncl() ? `<div><span>공급가액</span><span>${won(v.supply)}원</span></div><div><span>부가세</span><span>${won(v.vat)}원</span></div>` : `<div><span>상품 금액</span><span>${won(v.supply)}원</span></div><div><span>부가세 (10%)</span><span>${won(v.vat)}원</span></div>`}<div class="tot"><span>합계</span><span>${won(v.sum)}원</span></div></div>` : `<p class="hint">금액은 주문을 확인한 뒤 원윤메디팜이 안내해 드려요.</p>`}
       <button class="btn primary lg block" data-act="submitOrder"${lines.length && !S.busy ? '' : ' disabled'}>${S.busy ? '접수하는 중…' : '주문 접수하기'}</button>
       ${S.settings.cutoff ? `<p class="hint" style="text-align:center">${esc(S.settings.cutoff)}</p>` : ''}
     </div></aside>${bar}`;
@@ -722,9 +724,9 @@ function historyView() {
   return `<div class="stack" style="gap:12px">${list.map(o => {
     const open = !!S.ui.open[o.id]; const idx = flow.indexOf(o.status); const shipped = o.status === '출고' || o.status === '완료';
     const steps = o.status === '취소' ? pill('취소') : `<div class="steps">${flow.map((s, i) => `<span class="${i <= idx ? 'done' : ''}"><i></i>${ST[s][1]}</span>`).join('')}</div>`;
-    return `<article class="ocard"><div class="ocard-h"><div style="min-width:0;flex:1 1 220px"><div class="t oc-no">${esc(o.no)}</div><div class="muted" style="font-size:13px">${meta(fmtDT(o.created_at), `${(o.lines || []).length}품목 ${won(o.total)}원`, o.want_date ? `희망 ${fmtD(o.want_date)}` : '')}</div></div>${steps}
-      <div class="row"><button class="btn sm ghost" data-act="toggleOpen" data-id="${esc(o.id)}" aria-expanded="${open}">${open ? '접기' : '상세'}</button><button class="btn sm" data-act="reorder" data-id="${esc(o.id)}">다시 담기</button>${shipped && window.XLSX ? `<button class="btn sm" data-act="statement" data-id="${esc(o.id)}">거래명세서</button>` : ''}${o.status === '접수' ? `<button class="btn sm danger${S.ui.armed === 'cx:' + o.id ? ' armed' : ''}" data-act="custCancel" data-id="${esc(o.id)}">${S.ui.armed === 'cx:' + o.id ? '한 번 더 누르면 취소' : '주문 취소'}</button>` : ''}</div></div>
-      ${open ? `<div class="ocard-b"><div class="tbl-wrap" style="border:0;border-radius:0"><table><thead><tr><th>품목</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th>${shipped ? '<th>로트 · 유효기간</th>' : ''}</tr></thead><tbody>${(o.lines || []).map(l => `<tr><td><div class="t">${esc(l.name)}</div><div class="s">${esc(l.spec || '')} ${l.code ? '· ' + esc(l.code) : ''}</div></td><td class="num">${l.oqty != null && num(l.oqty) !== num(l.qty) ? `<span class="muted"><s>${won(l.oqty)}</s></span> ` : ''}${won(l.qty)}${esc(l.unit || '')}</td><td class="num">${won(l.price)}</td><td class="num">${won(num(l.qty) * num(l.price))}</td>${shipped ? `<td class="s">${esc(l.lot || '-')} ${l.exp ? '· ' + fmtD(l.exp) : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>${o.memo || o.admin_memo ? `<div class="panel-b" style="display:grid;gap:4px;font-size:13px">${o.memo ? `<div><span class="muted">요청사항</span> ${esc(o.memo)}</div>` : ''}${o.admin_memo ? `<div><span class="muted">원윤메디팜 안내</span> ${esc(o.admin_memo)}</div>` : ''}</div>` : ''}</div>` : ''}
+    return `<article class="ocard"><div class="ocard-h"><div style="min-width:0;flex:1 1 220px"><div class="t oc-no">${esc(o.no)}</div><div class="muted" style="font-size:13px">${meta(fmtDT(o.created_at), `${(o.lines || []).length}품목${custPrices() ? ` ${won(o.total)}원` : ''}`, o.want_date ? `희망 ${fmtD(o.want_date)}` : '')}</div></div>${steps}
+      <div class="row"><button class="btn sm ghost" data-act="toggleOpen" data-id="${esc(o.id)}" aria-expanded="${open}">${open ? '접기' : '상세'}</button><button class="btn sm" data-act="reorder" data-id="${esc(o.id)}">다시 담기</button>${shipped && custPrices() && window.XLSX ? `<button class="btn sm" data-act="statement" data-id="${esc(o.id)}">거래명세서</button>` : ''}${o.status === '접수' ? `<button class="btn sm danger${S.ui.armed === 'cx:' + o.id ? ' armed' : ''}" data-act="custCancel" data-id="${esc(o.id)}">${S.ui.armed === 'cx:' + o.id ? '한 번 더 누르면 취소' : '주문 취소'}</button>` : ''}</div></div>
+      ${open ? `<div class="ocard-b"><div class="tbl-wrap" style="border:0;border-radius:0"><table><thead><tr><th>품목</th><th class="num">수량</th>${custPrices() ? '<th class="num">단가</th><th class="num">금액</th>' : ''}${shipped ? '<th>로트 · 유효기간</th>' : ''}</tr></thead><tbody>${(o.lines || []).map(l => `<tr><td><div class="t">${esc(l.name)}</div><div class="s">${esc(l.spec || '')} ${l.code ? '· ' + esc(l.code) : ''}</div></td><td class="num">${l.oqty != null && num(l.oqty) !== num(l.qty) ? `<span class="muted"><s>${won(l.oqty)}</s></span> ` : ''}${won(l.qty)}${esc(l.unit || '')}</td>${custPrices() ? `<td class="num">${won(l.price)}</td><td class="num">${won(num(l.qty) * num(l.price))}</td>` : ''}${shipped ? `<td class="s">${esc(l.lot || '-')} ${l.exp ? '· ' + fmtD(l.exp) : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>${o.memo || o.admin_memo ? `<div class="panel-b" style="display:grid;gap:4px;font-size:13px">${o.memo ? `<div><span class="muted">요청사항</span> ${esc(o.memo)}</div>` : ''}${o.admin_memo ? `<div><span class="muted">원윤메디팜 안내</span> ${esc(o.admin_memo)}</div>` : ''}</div>` : ''}</div>` : ''}
     </article>`; }).join('')}</div>`;
 }
 function custReqsView() {
@@ -740,7 +742,7 @@ function custReqsView() {
 }
 function custInvoicesView() {
   const list = [...S.invoices.values()].sort((a, b) => ko(b.write_date, a.write_date));
-  return `<div class="stack"><p class="muted">발행이 끝난 전자세금계산서예요. 원본은 등록하신 이메일과 홈택스에서도 확인할 수 있어요.</p>${list.length ? `<div class="tbl-wrap"><table><thead><tr><th>작성일자</th><th>구분</th><th class="num">공급가액</th><th class="num">세액</th><th class="num">합계</th><th>국세청 승인번호</th></tr></thead><tbody>${list.map(t => `<tr><td class="tabnum">${fmtD(t.write_date)}</td><td><span class="tag">${esc(t.kind)}</span></td><td class="num">${won(t.supply)}</td><td class="num">${won(t.vat)}</td><td class="num"><b>${won(t.total)}</b></td><td class="mono">${esc(t.nts_id || '')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="panel"><div class="empty"><b>발행된 세금계산서가 없어요</b>출고된 주문은 원윤메디팜이 정해진 날짜에 계산서로 발행해요.</div></div>`}</div>`;
+  return `<div class="stack"><p class="muted">발행이 끝난 전자세금계산서예요. 원본은 등록하신 이메일과 홈택스에서도 확인할 수 있어요.</p>${list.length ? `<div class="tbl-wrap"><table><thead><tr><th>작성일자</th><th>구분</th>${custPrices() ? '<th class="num">공급가액</th><th class="num">세액</th><th class="num">합계</th>' : ''}<th>국세청 승인번호</th></tr></thead><tbody>${list.map(t => `<tr><td class="tabnum">${fmtD(t.write_date)}</td><td><span class="tag">${esc(t.kind)}</span></td>${custPrices() ? `<td class="num">${won(t.supply)}</td><td class="num">${won(t.vat)}</td><td class="num"><b>${won(t.total)}</b></td>` : ''}<td class="mono">${esc(t.nts_id || '')}</td></tr>`).join('')}</tbody></table></div>` : `<div class="panel"><div class="empty"><b>발행된 세금계산서가 없어요</b>출고된 주문은 원윤메디팜이 정해진 날짜에 계산서로 발행해요.</div></div>`}</div>`;
 }
 function meView() {
   const a = S.myAccount; const d = S.ui.np;
@@ -1203,7 +1205,7 @@ const A = {
     const d = S.ui.setd; if (!d) return;
     if (d.biz_no && digits(d.biz_no).length !== 10) return toast('사업자등록번호는 숫자 10자리예요', 'bad');
     const body = {}; for (const k of ['name', 'biz_no', 'ceo', 'tel', 'fax', 'addr', 'bank', 'biz_type', 'biz_item', 'tax_email', 'tax_manager', 'cutoff', 'notice']) body[k] = String(d[k] || '').trim();
-    body.name = body.name || '원윤메디팜'; body.vat_included = d.vat_included !== false; body.updated_at = new Date().toISOString();
+    body.name = body.name || '원윤메디팜'; body.vat_included = d.vat_included !== false; body.show_prices = d.show_prices === true; body.updated_at = new Date().toISOString();
     if (await run(() => q(sb.from('settings').update(body).eq('id', 1)), '설정을 저장했어요', false)) { await reload('settings'); S.ui.setd = null; render(); }
   },
   taxStatus() { S.tax = null; render(); loadTaxStatus(true); },
