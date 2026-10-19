@@ -400,7 +400,7 @@ function adminView() {
   const counts = { orders: all.filter(o => o.status === '접수' || o.status === '확인').length, invoices: invWait, reqs: pendingReqCount() };
   const v = NAV.some(n => n[0] === S.view) ? S.view : 'dash';
   const body = { dash: dashView, orders: ordersView, products: productsView, reqs: reqsView, accounts: accountsView, invoices: invoicesView, settle: settleView, export: exportView, settings: settingsView }[v]();
-  return `<div class="shell"><aside class="side">${brand('관리자')}<nav class="nav" aria-label="관리 메뉴">${NAV.map(([k, l]) => `<button class="nav-i${v === k ? ' on' : ''}" data-act="go" data-v="${k}"${v === k ? ' aria-current="page"' : ''}>${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('')}</nav><div class="side-foot"><span><b>${esc(S.profile.name || S.profile.login_id)}</b> 관리자</span><button class="linkbtn" data-act="logout">로그아웃</button></div></aside><main class="main">${body}</main></div>`;
+  return `<div class="shell"><aside class="side"><div class="side-top">${brand('관리자')}<button class="btn sm m-logout" data-act="logout">로그아웃</button></div><nav class="nav" aria-label="관리 메뉴">${NAV.map(([k, l]) => `<button class="nav-i${v === k ? ' on' : ''}" data-act="go" data-v="${k}"${v === k ? ' aria-current="page"' : ''}>${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('')}</nav><div class="side-foot"><span><b>${esc(S.profile.name || S.profile.login_id)}</b> 관리자</span><button class="linkbtn" data-act="logout">로그아웃</button></div></aside><main class="main">${body}</main></div>`;
 }
 
 function dashView() {
