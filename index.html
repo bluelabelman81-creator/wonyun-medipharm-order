@@ -231,6 +231,22 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 /* shop — 거래처 주문 */
 .shop{display:grid;grid-template-columns:minmax(0,1fr) 352px;gap:28px;align-items:start}
 .shop-tools{display:grid;gap:14px}
+.ktabs{display:grid;border:1px solid var(--rule-2);border-radius:6px;overflow:hidden;background:var(--sheet)}
+.ktabs button{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;min-width:0;padding:15px 20px;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;color:var(--ink-2);transition:background .15s}
+.ktabs button+button{border-left:1px solid var(--rule-2)}
+.ktabs button:hover{background:var(--sunken)}
+.ktabs .kt-l{font-family:var(--f-head);font-size:18px;font-weight:500;color:var(--ink);white-space:nowrap}
+.ktabs .kt-c{font-size:13px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ktabs .kt-b{margin-left:auto;padding:2px 9px;border-radius:999px;background:var(--gold-tint);color:var(--gold-ink);font-size:12px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ktabs button.on{background:var(--primary);cursor:default}
+.ktabs button.on .kt-l{color:var(--primary-ink)}
+.ktabs button.on .kt-c{color:color-mix(in srgb,var(--primary-ink) 72%,transparent)}
+.ktabs button.on .kt-b{background:var(--gold);color:var(--primary-ink)}
+.ktabs button:focus-visible{outline-offset:-3px}
+tr.grp-row td{background:var(--sunken);padding:9px 16px;font-family:var(--f-head);font-size:14px;font-weight:500;color:var(--ink);border-bottom:1px solid var(--rule)}
+tr.grp-row td span{margin-left:6px;font-family:var(--f-sans);font-size:12.5px;font-weight:500;color:var(--ink-3)}
+.cl-g{display:flex;justify-content:space-between;gap:8px;padding:10px 20px 8px;background:var(--sunken);border-bottom:1px solid var(--rule);font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.cl-g span+span{font-weight:500;color:var(--ink-3)}
 .plist{background:var(--sheet);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
 .prow{display:grid;grid-template-columns:24px minmax(0,1fr) 124px 96px 144px;grid-template-areas:"fav info price stock qty";align-items:center;gap:10px 16px;padding:15px 20px;border-bottom:1px solid var(--rule);transition:background .15s}
 .plist.noprice .prow{grid-template-columns:24px minmax(0,1fr) 96px 144px;grid-template-areas:"fav info stock qty"}
@@ -399,6 +415,9 @@ td .s{font-size:12.5px;color:var(--ink-3)}
   .main{padding-inline:28px}
 }
 @media (max-width:860px){
+  .ktabs button{padding:12px 14px;gap:2px 8px}
+  .ktabs .kt-l{font-size:16px}
+  .ktabs .kt-b{margin-left:0}
   .shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
   .side{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;height:auto;gap:12px;padding:14px 16px 6px;border-right:0;border-bottom:1px solid var(--rule)}
   .side .brand{padding:0;flex-direction:row;align-items:center;gap:12px}
@@ -459,6 +478,6 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 <noscript><p style="padding:24px">자바스크립트를 켜야 주문 사이트를 쓸 수 있어요.</p></noscript>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

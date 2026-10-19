@@ -58,6 +58,8 @@ const rqPill = s => `<span class="pill ${RQ[s]?.[0] || ''}">${esc(RQ[s]?.[1] || 
 const TI = { '대기': ['st-new', '발행 대기'], '발행중': ['st-conf', '발행 중'], '발행완료': ['st-ship', '발행 완료'], '실패': ['st-cancel', '실패'], '취소': ['st-done', '취소됨'] };
 const tiPill = s => `<span class="pill ${TI[s]?.[0] || ''}">${esc(TI[s]?.[1] || s)}</span>`;
 const KINDS = ['의약품', '의료소모품', '의약외품'];
+const kindOf = p => (p && p.kind) || '의약품';
+const byKind = (a, b) => KINDS.indexOf(kindOf(a)) - KINDS.indexOf(kindOf(b));
 const ACC_TYPES = ['약국', '치과', '의원', '병원', '한의원', '기타'];
 const PAY_METHODS = ['계좌이체', '카드', '현금', '어음', '상계'];
 
@@ -70,7 +72,7 @@ const S = {
   ui: {
     lg: { id: '', pw: '' }, su: {}, np: {},
     ostatus: '접수', oq: '', pq: '', pkind: '', pgroup: '', aq: '',
-    shopQ: '', shopChip: '전체', shopGroup: '',
+    shopQ: '', shopChip: '전체', shopGroup: '', shopKind: LS.get('shopKind', '의약품'),
     stab: LS.get('stab', '현황'), sq: '', sexp: 180, rcv: LS.get('rcv', null), rcvQ: '', hFrom: thisMonth() + '-01', hTo: today(), hType: '', hq: '', supQ: '',
     exFrom: thisMonth() + '-01', exTo: today(), settleMonth: thisMonth(),
     invMonth: (new Date().getDate() <= 10 ? prevMonth() : thisMonth()), invStatus: '',
@@ -509,24 +511,29 @@ function reqsView() {
 const reqKey = r => r.product_id || ('n:' + String(r.name || '').replace(/\s/g, '').toLowerCase());
 
 function productsView() {
-  let list = products();
+  const allP = products();
+  const kinds = KINDS.filter(k => allP.some(p => kindOf(p) === k));
+  const pk = kinds.includes(S.ui.pkind) ? S.ui.pkind : '';
+  let list = pk ? allP.filter(p => kindOf(p) === pk) : allP;
+  const groups = [...new Set(list.map(p => p.grp).filter(Boolean))].sort(ko);
+  const pg = groups.includes(S.ui.pgroup) ? S.ui.pgroup : '';
   const qq = S.ui.pq.trim().toLowerCase();
   if (qq) list = list.filter(p => [p.name, p.spec, p.code, p.std, p.grp, p.maker].join(' ').toLowerCase().includes(qq));
-  if (S.ui.pkind) list = list.filter(p => (p.kind || '의약품') === S.ui.pkind);
-  if (S.ui.pgroup) list = list.filter(p => p.grp === S.ui.pgroup);
-  list.sort((a, b) => num(S.rx.get(b.id)?.qty) - num(S.rx.get(a.id)?.qty) || ko(a.name, b.name));
-  const groups = [...new Set(products().map(p => p.grp).filter(Boolean))].sort(ko);
+  if (pg) list = list.filter(p => p.grp === pg);
+  list.sort((a, b) => byKind(a, b) || num(S.rx.get(b.id)?.qty) - num(S.rx.get(a.id)?.qty) || ko(a.name, b.name));
+  const split = !pk && new Set(list.map(kindOf)).size > 1;
   const rxMonth = [...S.rx.values()][0]?.month;
   return head('상품·재고', meta(`${S.products.size}개 품목`, rxMonth ? `처방량은 ${rxMonth.replace('-', '년 ')}월 원외처방 통계 기준 (관리자만 보여요)` : ''), `<button class="btn" data-act="importXlsx">엑셀 올리기</button><button class="btn" data-act="exProducts">엑셀 내려받기</button><button class="btn primary" data-act="newProduct">상품 추가</button>`) + `
   <div class="stack">
+    ${kinds.length > 1 ? `<div class="row"><div class="seg" role="tablist" aria-label="상품 구분">${[['', '전체', allP.length], ...kinds.map(k => [k, k, allP.filter(p => kindOf(p) === k).length])].map(([k, l, n]) => `<button role="tab" aria-selected="${pk === k}" class="${pk === k ? 'on' : ''}" data-act="pkind" data-k="${esc(k)}">${esc(l)}<span class="c">${n}</span></button>`).join('')}</div></div>` : ''}
     <div class="row">
       <div class="search"><label class="sr" for="pq">상품 검색</label><input class="inp" id="pq" data-bind="pq" value="${esc(S.ui.pq)}" placeholder="제품명·성분·보험코드 검색"></div>
-      <label class="sr" for="pkind">구분</label><select class="inp" id="pkind" data-bind="pkind" style="width:auto"><option value="">구분 전체</option>${KINDS.map(k => opt(k, S.ui.pkind)).join('')}</select>
-      <label class="sr" for="pgroup">효능군</label><select class="inp" id="pgroup" data-bind="pgroup" style="width:auto;max-width:240px"><option value="">효능군 전체</option>${groups.map(g => opt(g, S.ui.pgroup)).join('')}</select>
+      ${groups.length ? `<label class="sr" for="pgroup">${pk === '의약품' ? '효능군' : '분류'}</label><select class="inp" id="pgroup" data-bind="pgroup" style="width:auto;max-width:240px"><option value="">${pk === '의약품' ? '효능군 전체' : pk ? '분류 전체' : '효능군·분류 전체'}</option>${groups.map(g => opt(g, pg)).join('')}</select>` : ''}
     </div>
-    ${list.length ? `<div class="tbl-wrap" data-keep="ptbl"><table><thead><tr><th>보험코드</th><th>제품명 · 규격</th><th>효능군</th><th class="num">판매가</th><th>재고</th><th class="num">월 처방량</th><th class="num">한 달 치 부족</th><th>가까운 유효기간</th><th></th></tr></thead><tbody>
-      ${list.map(p => { const lot = liveLots(p)[0]; const need = num(S.rx.get(p.id)?.qty); const short = p.track && need ? Math.max(0, need - num(p.stock)) : 0; const dd = lot ? daysUntil(lot.exp) : Infinity;
-        return `<tr${p.active === false ? ' style="opacity:.55"' : ''}><td class="mono nowrap">${esc(p.code || '-')}</td><td><div class="t">${esc(p.name)}${p.active === false ? ' <span class="tag">판매중지</span>' : ''}${(p.kind && p.kind !== '의약품') ? ` <span class="tag gold">${esc(p.kind)}</span>` : ''}</div><div class="s">${esc(p.spec || '')}${p.maker ? ' · ' + esc(p.maker) : ''}${num(p.step) > 1 ? ` · ${num(p.step)}${esc(p.unit || '')} 단위 주문` : ''}</div></td><td class="s"><div class="cw">${esc(p.grp || '')}</div></td><td class="num"><b>${won(p.price)}</b><div class="s">/${esc(p.unit || '개')}${num(p.base_price) && num(p.base_price) !== num(p.price) ? ` · 기준 ${won(p.base_price)}` : ''}</div></td><td>${stockTag(p)}</td><td class="num">${need ? won(need) : '<span class="muted">-</span>'}</td><td class="num">${short ? `<span class="tag warn tabnum">${won(short)}</span>` : (p.track && need ? '<span class="muted">충분</span>' : '<span class="muted">-</span>')}</td><td class="nowrap">${lot ? `<span class="tag ${dd <= 60 ? 'bad' : dd <= 180 ? 'warn' : ''} tabnum">${fmtD(lot.exp) || '미입력'}</span>` : '<span class="muted">-</span>'}</td><td class="nowrap"><button class="btn sm" data-act="editStock" data-id="${esc(p.id)}">입출고</button> <button class="btn sm ghost" data-act="editProduct" data-id="${esc(p.id)}">수정</button></td></tr>`; }).join('')}
+    ${list.length ? `<div class="tbl-wrap" data-keep="ptbl"><table><thead><tr><th>보험코드</th><th>제품명 · 규격</th><th>${pk === '의료소모품' ? '분류' : pk === '의약품' ? '효능군' : '효능군 · 분류'}</th><th class="num">판매가</th><th>재고</th><th class="num">월 처방량</th><th class="num">한 달 치 부족</th><th>가까운 유효기간</th><th></th></tr></thead><tbody>
+      ${list.map((p, i) => { const lot = liveLots(p)[0]; const need = num(S.rx.get(p.id)?.qty); const short = p.track && need ? Math.max(0, need - num(p.stock)) : 0; const dd = lot ? daysUntil(lot.exp) : Infinity;
+        const gh = split && (i === 0 || kindOf(list[i - 1]) !== kindOf(p)) ? `<tr class="grp-row"><td colspan="9">${esc(kindOf(p))} <span>${list.filter(x => kindOf(x) === kindOf(p)).length}개</span></td></tr>` : '';
+        return `${gh}<tr${p.active === false ? ' style="opacity:.55"' : ''}><td class="mono nowrap">${esc(p.code || '-')}</td><td><div class="t">${esc(p.name)}${p.active === false ? ' <span class="tag">판매중지</span>' : ''}</div><div class="s">${esc(p.spec || '')}${p.maker ? ' · ' + esc(p.maker) : ''}${num(p.step) > 1 ? ` · ${num(p.step)}${esc(p.unit || '')} 단위 주문` : ''}</div></td><td class="s"><div class="cw">${esc(p.grp || '')}</div></td><td class="num"><b>${won(p.price)}</b><div class="s">/${esc(p.unit || '개')}${num(p.base_price) && num(p.base_price) !== num(p.price) ? ` · 기준 ${won(p.base_price)}` : ''}</div></td><td>${stockTag(p)}</td><td class="num">${need ? won(need) : '<span class="muted">-</span>'}</td><td class="num">${short ? `<span class="tag warn tabnum">${won(short)}</span>` : (p.track && need ? '<span class="muted">충분</span>' : '<span class="muted">-</span>')}</td><td class="nowrap">${lot ? `<span class="tag ${dd <= 60 ? 'bad' : dd <= 180 ? 'warn' : ''} tabnum">${fmtD(lot.exp) || '미입력'}</span>` : '<span class="muted">-</span>'}</td><td class="nowrap"><button class="btn sm" data-act="editStock" data-id="${esc(p.id)}">입출고</button> <button class="btn sm ghost" data-act="editProduct" data-id="${esc(p.id)}">수정</button></td></tr>`; }).join('')}
     </tbody></table></div>` : `<div class="panel"><div class="empty"><b>${S.products.size ? '조건에 맞는 상품이 없어요' : '등록된 상품이 없어요'}</b>${S.products.size ? '검색어나 필터를 바꿔 보세요.' : '상품 추가나 엑셀 올리기로 상품을 등록하세요.'}</div></div>`}
     <p class="hint">엑셀 올리기: 매달 받는 원외처방 통계 엑셀(구분·코드·약제명·단가·총 처방량)을 그대로 올리면 처방량과 기준가가 갱신되고, 없는 품목은 새로 추가돼요. 의료소모품은 제품명·규격·판매가 열이 있는 엑셀도 올릴 수 있어요.</p>
   </div>`;
@@ -567,7 +574,8 @@ function invTab() {
   const outN = shortL.filter(p => num(p.stock) <= 0).length;
   const qq = S.ui.sq.trim().toLowerCase();
   let list = tracked; if (qq) list = list.filter(p => [p.name, p.spec, p.code, p.maker, supName(S.costs.get(p.id)?.supplier_id)].join(' ').toLowerCase().includes(qq));
-  list = [...list].sort((a, b) => ko(a.name, b.name));
+  list = [...list].sort((a, b) => byKind(a, b) || ko(a.name, b.name));
+  const split = new Set(list.map(kindOf)).size > 1;
   const untracked = all.filter(p => !p.track && p.active !== false).length;
   return `
     <div class="kpis">
@@ -586,7 +594,7 @@ function invTab() {
     </div>
     <section class="panel"><div class="panel-h"><h2>재고 목록</h2><div class="search" style="max-width:280px"><label class="sr" for="sq">재고 검색</label><input class="inp sm" id="sq" data-bind="sq" value="${esc(S.ui.sq)}" placeholder="품목·매입처 검색"></div></div>
       <div class="tbl-wrap" data-keep="stbl" style="border:0;border-radius:0"><table><thead><tr><th>제품명 · 규격</th><th class="num">현재고</th><th>가까운 유효기간</th><th class="num">매입가</th><th class="num">판매가</th><th class="num">마진</th><th class="num">재고 금액</th><th>매입처</th><th></th></tr></thead><tbody>
-      ${list.map(p => { const lot = liveLots(p)[0]; const dd = lot ? daysUntil(lot.exp) : Infinity; const c = costOf(p); const m = margin(p.price, c); return `<tr${p.active === false ? ' style="opacity:.55"' : ''}><td><div class="t">${esc(p.name)}</div><div class="s">${esc(p.spec || '')}${p.code ? ' · <span class="mono">' + esc(p.code) + '</span>' : ''}</div></td><td class="num">${stockTag(p)}<div class="s">${esc(p.unit || '개')}</div></td><td class="nowrap">${lot && lot.exp ? `<span class="tag ${dd <= 60 ? 'bad' : dd <= 180 ? 'warn' : ''} tabnum">${fmtD(lot.exp)}</span>` : '<span class="muted">-</span>'}</td><td class="num">${c ? won(c) : '<span class="muted">-</span>'}</td><td class="num">${won(p.price)}</td><td class="num">${m ? `<span class="${m.amt < 0 ? 'neg' : ''}">${m.pct}%</span><div class="s">${won(m.amt)}원</div>` : '<span class="muted">-</span>'}</td><td class="num">${c && num(p.stock) > 0 ? won(c * num(p.stock)) : '<span class="muted">-</span>'}</td><td class="s"><div class="cw">${esc(supName(S.costs.get(p.id)?.supplier_id))}</div></td><td class="nowrap"><button class="btn sm" data-act="editStock" data-id="${esc(p.id)}">입출고</button> <button class="btn sm ghost" data-act="editProduct" data-id="${esc(p.id)}">수정</button></td></tr>`; }).join('') || `<tr><td colspan="9" class="muted" style="text-align:center;padding:22px">검색 결과가 없어요</td></tr>`}
+      ${list.map((p, i) => { const lot = liveLots(p)[0]; const dd = lot ? daysUntil(lot.exp) : Infinity; const c = costOf(p); const m = margin(p.price, c); const gh = split && (i === 0 || kindOf(list[i - 1]) !== kindOf(p)) ? `<tr class="grp-row"><td colspan="9">${esc(kindOf(p))} <span>${list.filter(x => kindOf(x) === kindOf(p)).length}개</span></td></tr>` : ''; return `${gh}<tr${p.active === false ? ' style="opacity:.55"' : ''}><td><div class="t">${esc(p.name)}</div><div class="s">${esc(p.spec || '')}${p.code ? ' · <span class="mono">' + esc(p.code) + '</span>' : ''}</div></td><td class="num">${stockTag(p)}<div class="s">${esc(p.unit || '개')}</div></td><td class="nowrap">${lot && lot.exp ? `<span class="tag ${dd <= 60 ? 'bad' : dd <= 180 ? 'warn' : ''} tabnum">${fmtD(lot.exp)}</span>` : '<span class="muted">-</span>'}</td><td class="num">${c ? won(c) : '<span class="muted">-</span>'}</td><td class="num">${won(p.price)}</td><td class="num">${m ? `<span class="${m.amt < 0 ? 'neg' : ''}">${m.pct}%</span><div class="s">${won(m.amt)}원</div>` : '<span class="muted">-</span>'}</td><td class="num">${c && num(p.stock) > 0 ? won(c * num(p.stock)) : '<span class="muted">-</span>'}</td><td class="s"><div class="cw">${esc(supName(S.costs.get(p.id)?.supplier_id))}</div></td><td class="nowrap"><button class="btn sm" data-act="editStock" data-id="${esc(p.id)}">입출고</button> <button class="btn sm ghost" data-act="editProduct" data-id="${esc(p.id)}">수정</button></td></tr>`; }).join('') || `<tr><td colspan="9" class="muted" style="text-align:center;padding:22px">검색 결과가 없어요</td></tr>`}
       </tbody></table></div>
     </section>
     ${untracked ? `<p class="hint">재고를 관리하지 않는 품목 ${untracked}개는 목록에 없어요. 입고를 한 번 등록하면 그때부터 재고를 추적해요.</p>` : ''}`;
@@ -795,20 +803,27 @@ function customerView() {
 }
 function shopView(ctx) {
   const key = ctx.account_id; const cart = cartOf(key);
-  let items = products().filter(p => p.active !== false);
+  const act = products().filter(p => p.active !== false);
+  const kinds = KINDS.filter(k => act.some(p => kindOf(p) === k));
+  const kind = kinds.includes(S.ui.shopKind) ? S.ui.shopKind : (kinds[0] || '의약품');
+  const isDrug = kind === '의약품';
+  let items = act.filter(p => kindOf(p) === kind);
   const groups = [...new Set(items.map(p => p.grp).filter(Boolean))].sort(ko);
+  const grp = groups.includes(S.ui.shopGroup) ? S.ui.shopGroup : '';
   const myOrders = allOrders().filter(o => o.status !== '취소').sort((a, b) => ko(b.created_at, a.created_at));
   const freq = new Map(); for (const o of myOrders) for (const l of o.lines || []) freq.set(l.pid, (freq.get(l.pid) || 0) + 1);
-  const chip = S.ui.shopChip;
+  const chip = ['전체', '즐겨찾기', '자주 주문'].includes(S.ui.shopChip) ? S.ui.shopChip : '전체';
   if (chip === '즐겨찾기') items = items.filter(p => S.favs.has(p.id));
   else if (chip === '자주 주문') items = items.filter(p => freq.has(p.id)).sort((a, b) => freq.get(b.id) - freq.get(a.id));
-  else if (KINDS.includes(chip)) items = items.filter(p => (p.kind || '의약품') === chip);
-  if (S.ui.shopGroup) items = items.filter(p => p.grp === S.ui.shopGroup);
+  if (grp) items = items.filter(p => p.grp === grp);
   const qq = S.ui.shopQ.trim().toLowerCase();
-  if (qq) items = items.filter(p => [p.name, p.spec, p.code, p.grp, p.maker].join(' ').toLowerCase().includes(qq));
+  const hit = p => [p.name, p.spec, p.code, p.grp, p.maker].join(' ').toLowerCase().includes(qq);
+  if (qq) items = items.filter(hit);
   if (chip !== '자주 주문') items.sort((a, b) => ko(a.name, b.name));
-  const kindsPresent = KINDS.filter(k => products().some(p => (p.kind || '의약품') === k && p.active !== false));
-  const chips = ['전체', '즐겨찾기', '자주 주문', ...(kindsPresent.length > 1 ? kindsPresent : [])];
+  // 검색어가 다른 구분에서 걸리면 알려 줌
+  const elsewhere = qq ? kinds.filter(k => k !== kind).map(k => ({ k, n: act.filter(p => kindOf(p) === k && hit(p)).length })).filter(x => x.n) : [];
+  const inCart = k => Object.entries(cart.lines).filter(([pid, q]) => q > 0 && kindOf(S.products.get(pid)) === k && S.products.get(pid)?.active !== false).length;
+  const chips = ['전체', '즐겨찾기', '자주 주문'];
   const last = myOrders[0];
   const rows = items.map(p => {
     const qv = cart.lines[p.id] || 0; const pr = priceFor(p, ctx); const step = Math.max(1, num(p.step) || 1); const ok = orderable(p); const rq = ok ? null : myOpenReq(p.id);
@@ -818,22 +833,28 @@ function shopView(ctx) {
       <div class="pstock">${availTag(p)}</div>
       ${ok ? `<div class="qty"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="-${step}" aria-label="${esc(p.name)} 수량 빼기">−</button><input id="q-${esc(p.id)}" inputmode="numeric" autocomplete="off" data-cartqty="${esc(p.id)}" data-key="${esc(key)}" value="${qv || ''}" placeholder="0" aria-label="${esc(p.name)} 주문 수량"><button data-act="qty" data-key="${esc(key)}" data-id="${esc(p.id)}" data-d="${step}" aria-label="${esc(p.name)} 수량 더하기">+</button></div>` : rq ? `<div class="pact"><span class="tag gold">재고 요청함</span><span class="s">${fmtD(rq.created_at)} ${RQ[rq.status][1]}</span></div>` : `<div class="pact"><button class="btn sm" data-act="reqStock" data-id="${esc(p.id)}">재고 요청</button></div>`}</div>`;
   }).join('');
-  const emptyMsg = chip === '즐겨찾기' ? ['즐겨찾기한 품목이 없어요', '품목 이름 왼쪽의 별을 누르면 자주 찾는 품목을 모아 볼 수 있어요.'] : chip === '자주 주문' ? ['아직 주문 기록이 없어요', '주문하면 자주 주문한 품목이 여기에 모여요.'] : qq ? ['찾는 약품이 목록에 없어요', '이름 일부나 보험코드로 다시 찾아 보거나, 원윤메디팜에 보유를 요청해 주세요.'] : ['판매 중인 품목이 없어요', ''];
+  const goOther = elsewhere.map(x => `<button class="btn sm" data-act="shopKind" data-k="${esc(x.k)}">${esc(x.k)}에서 ${x.n}개 보기</button>`).join('');
+  const emptyMsg = qq && elsewhere.length ? [`${kind} 목록에는 찾는 품목이 없어요`, `${elsewhere.map(x => `${x.k}에서 ${x.n}개`).join(', ')}를 찾았어요.`]
+    : chip === '즐겨찾기' ? ['즐겨찾기한 품목이 없어요', `${kind} 품목 이름 왼쪽의 별을 누르면 자주 찾는 품목을 모아 볼 수 있어요.`]
+    : chip === '자주 주문' ? [`아직 주문한 ${kind}이 없어요`, '주문하면 자주 주문한 품목이 여기에 모여요.']
+    : qq ? ['찾는 품목이 목록에 없어요', `이름 일부${isDrug ? '나 보험코드' : ''}로 다시 찾아 보거나, 원윤메디팜에 보유를 요청해 주세요.`] : [`판매 중인 ${kind}이 없어요`, ''];
   const arrived = newlyResolved().filter(r => r.status === '입고완료');
-  const reqCta = `<button class="btn sm" data-act="reqNew">약품 보유 요청</button>`;
+  const reqCta = `<button class="btn sm" data-act="reqNew">${isDrug ? '약품' : '품목'} 보유 요청</button>`;
   return `<div class="shop">
     <div class="stack" style="gap:12px;min-width:0">
       ${arrived.length ? `<div class="note ok"><b>재고 요청하신 품목이 입고됐어요</b>${esc(arrived[0].name)}${arrived.length > 1 ? ` 외 ${arrived.length - 1}건` : ''} <button class="btn sm" data-act="cview" data-v="reqs">확인하기</button></div>` : ''}
       ${last ? `<div class="again">${meta(`최근 주문 <b class="mono">${esc(last.no)}</b>`, fmtD(last.created_at), `${(last.lines || []).length}품목${custPrices() ? ` ${won(last.total)}원` : ''}`)}<button class="btn sm" data-act="reorder" data-id="${esc(last.id)}">그대로 다시 담기</button></div>` : ''}
+      ${kinds.length > 1 ? `<div class="ktabs" role="tablist" aria-label="품목 구분" style="grid-template-columns:repeat(${kinds.length},minmax(0,1fr))">${kinds.map(k => { const n = act.filter(p => kindOf(p) === k).length; const c = inCart(k); return `<button role="tab" aria-selected="${k === kind}" class="${k === kind ? 'on' : ''}" data-act="shopKind" data-k="${esc(k)}"><span class="kt-l">${esc(k)}</span><span class="kt-c">${n}개 품목</span>${c ? `<span class="kt-b">${c}개 담음</span>` : ''}</button>`; }).join('')}</div>` : ''}
       <div class="shop-tools">
-        <div class="row"><div class="search" style="max-width:none"><label class="sr" for="shopQ">품목 검색</label><input class="inp" id="shopQ" data-bind="shopQ" value="${esc(S.ui.shopQ)}" placeholder="제품명·성분·보험코드로 찾기" autocomplete="off"></div>
-          <label class="sr" for="shopGroup">효능군</label><select class="inp" id="shopGroup" data-bind="shopGroup" style="width:auto;max-width:220px"><option value="">효능군 전체</option>${groups.map(g => opt(g, S.ui.shopGroup)).join('')}</select></div>
+        <div class="row"><div class="search" style="max-width:none"><label class="sr" for="shopQ">${esc(kind)} 검색</label><input class="inp" id="shopQ" data-bind="shopQ" value="${esc(S.ui.shopQ)}" placeholder="${isDrug ? '제품명·성분·보험코드로 찾기' : '제품명·규격으로 찾기 (예: 주사기, 거즈)'}" autocomplete="off"></div>
+          ${groups.length ? `<label class="sr" for="shopGroup">${isDrug ? '효능군' : '분류'}</label><select class="inp" id="shopGroup" data-bind="shopGroup" style="width:auto;max-width:220px"><option value="">${isDrug ? '효능군 전체' : '분류 전체'}</option>${groups.map(g => opt(g, grp)).join('')}</select>` : ''}</div>
         <div class="chips-row"><div class="chips">${chips.map(c => `<button class="chip${chip === c ? ' on' : ''}" data-act="shopChip" data-c="${c}">${c}</button>`).join('')}</div>
           <div class="xl-acts"><button class="btn sm ghost" data-act="orderTemplate">주문서 양식 받기</button><button class="btn sm" data-act="orderXlsx">엑셀로 담기</button></div></div>
       </div>
-      ${items.length ? `<div class="plist${custPrices() ? '' : ' noprice'}">${rows}</div>` : `<div class="panel"><div class="empty"><b>${emptyMsg[0]}</b>${emptyMsg[1]}${qq ? `<div style="margin-top:14px">${reqCta}</div>` : ''}</div></div>`}
-      ${qq ? drugPanel('shop') : ''}
-      ${items.length && qq ? `<div class="reqline"><span>찾는 약품이 목록에 없나요? 원윤메디팜에 보유를 요청할 수 있어요.</span>${reqCta}</div>` : ''}
+      ${items.length && elsewhere.length ? `<div class="reqline"><span>'${esc(S.ui.shopQ.trim())}' 검색 결과가 ${elsewhere.map(x => `${esc(x.k)}에도 ${x.n}개`).join(', ')} 있어요.</span><span class="row">${goOther}</span></div>` : ''}
+      ${items.length ? `<div class="plist${custPrices() ? '' : ' noprice'}">${rows}</div>` : `<div class="panel"><div class="empty"><b>${emptyMsg[0]}</b>${emptyMsg[1]}${qq ? `<div class="row" style="justify-content:center;margin-top:14px">${goOther}${reqCta}</div>` : ''}</div></div>`}
+      ${qq && isDrug ? drugPanel('shop') : ''}
+      ${items.length && qq ? `<div class="reqline"><span>찾는 ${isDrug ? '약품' : '품목'}이 목록에 없나요? 원윤메디팜에 보유를 요청할 수 있어요.</span>${reqCta}</div>` : ''}
     </div>
     ${cartPanel(ctx)}
   </div>`;
@@ -841,11 +862,13 @@ function shopView(ctx) {
 function cartPanel(ctx) {
   const key = ctx.account_id; const cart = cartOf(key);
   const all = Object.entries(cart.lines).map(([pid, qv]) => { const p = S.products.get(pid); return p && p.active !== false ? { p, qty: qv, price: priceFor(p, ctx), ok: orderable(p) } : null; }).filter(Boolean);
-  const lines = all.filter(l => l.ok); const outs = all.filter(l => !l.ok);
+  const lines = all.filter(l => l.ok).sort((a, b) => byKind(a.p, b.p)); const outs = all.filter(l => !l.ok);
+  const multi = new Set(lines.map(l => kindOf(l.p))).size > 1;
+  const kHead = (l, i) => multi && (i === 0 || kindOf(lines[i - 1].p) !== kindOf(l.p)) ? `<div class="cl-g"><span>${esc(kindOf(l.p))}</span><span>${lines.filter(x => kindOf(x.p) === kindOf(l.p)).length}품목</span></div>` : '';
   const total = lines.reduce((a, l) => a + l.qty * l.price, 0); const v = vatSplit(total);
   const bar = lines.length ? `<div class="cartbar"><span class="cb-t">${meta(`${lines.length}품목`, custPrices() ? `${won(v.sum)}원` : '')}</span><button class="btn primary" data-act="toCart">장바구니 보기</button></div>` : '';
   return `<aside class="cart" id="cart" aria-label="장바구니"><div class="cart-h"><h2>장바구니</h2><span class="muted">${lines.length}품목</span></div>
-    <div class="cart-lines" data-keep="cartl">${outs.map(l => `<div class="cl out"><span class="cl-n">${esc(l.p.name)}</span><span class="tag bad">품절</span><span class="cl-q">주문에서 빠져요</span><button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('')}${lines.length ? lines.map(l => `<div class="cl"><span class="cl-n">${esc(l.p.name)}</span>${custPrices() ? `<span class="cl-a">${won(l.qty * l.price)}</span><span class="cl-q">${won(l.qty)}${esc(l.p.unit || '')} × ${won(l.price)}원</span>` : `<span class="cl-a">${won(l.qty)}${esc(l.p.unit || '')}</span><span class="cl-q">${esc(l.p.spec || '')}</span>`}<button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('') : outs.length ? '' : `<div class="empty" style="padding:22px 16px">목록에서 수량을 입력하면<br>여기에 담겨요.</div>`}</div>
+    <div class="cart-lines" data-keep="cartl">${outs.map(l => `<div class="cl out"><span class="cl-n">${esc(l.p.name)}</span><span class="tag bad">품절</span><span class="cl-q">주문에서 빠져요</span><button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('')}${lines.length ? lines.map((l, i) => `${kHead(l, i)}<div class="cl"><span class="cl-n">${esc(l.p.name)}</span>${custPrices() ? `<span class="cl-a">${won(l.qty * l.price)}</span><span class="cl-q">${won(l.qty)}${esc(l.p.unit || '')} × ${won(l.price)}원</span>` : `<span class="cl-a">${won(l.qty)}${esc(l.p.unit || '')}</span><span class="cl-q">${esc(l.p.spec || '')}</span>`}<button class="cl-x" data-act="rmLine" data-key="${esc(key)}" data-id="${esc(l.p.id)}">빼기</button></div>`).join('') : outs.length ? '' : `<div class="empty" style="padding:22px 16px">목록에서 수량을 입력하면<br>여기에 담겨요.</div>`}</div>
     <div class="cart-f">
       <label class="fld" for="cart-date"><span>희망 배송일</span><input class="inp" type="date" id="cart-date" data-cart="want_date" data-key="${esc(key)}" value="${esc(cart.want_date || '')}" min="${today()}"></label>
       <label class="fld" for="cart-memo"><span>요청사항</span><textarea class="inp" id="cart-memo" data-cart="memo" data-key="${esc(key)}" rows="2" placeholder="예: 오전 중 배송 부탁드려요">${esc(cart.memo || '')}</textarea></label>
@@ -982,12 +1005,14 @@ const MODALS = {
     return frame(`${esc(d.name)} ${kindTag(d.kind)}`, '', body, foot);
   },
   stockReq() {
-    const p = M.data.pid ? S.products.get(M.data.pid) : null; const ext = M.data.ext;
+    const p = M.data.pid ? S.products.get(M.data.pid) : null; const ext = M.data.ext; const sup = !p && !ext && M.data.kind === '의료소모품';
     const body = p ? `<div class="note"><b>지금 주문할 수 없는 품목이에요</b>요청을 남기면 원윤메디팜이 확인하고, 입고되면 '재고 요청' 탭과 주문하기 화면에 바로 표시돼요.</div>
       <div class="fgrid">${mf('필요 수량 (선택)', 'qty', { af: true, ph: `예: 한 달 300${p.unit && p.unit !== '개' ? p.unit : '개'}` })}${mf('메모 (선택)', 'memo', { ph: '예: 다음 주까지 필요해요' })}</div>`
-      : `${ext ? `<div class="note"><b>식약처 품목</b>${meta(esc(ext.name), esc(ext.company || ''), '품목기준코드 ' + esc(ext.seq), ext.code ? '보험코드 ' + esc(ext.code) : '')}</div>` : ''}<p class="hint">찾는 약품이 목록에 없으면 알려 주세요. 원윤메디팜이 확인해서 보유 여부를 안내해 드려요.</p>
-      <div class="fgrid">${mf('약품 이름', 'name', { req: true, full: true, af: true, ph: '예: 리피토정 10mg' })}${mf('규격 (선택)', 'spec', { ph: '예: 10mg/1정' })}${mf('제조사 (선택)', 'maker')}${mf('필요 수량 (선택)', 'qty', { ph: '예: 한 달 300정' })}${mf('메모 (선택)', 'memo', { ph: '예: 보험코드, 대체약 가능 여부' })}</div>`;
-    return frame(p ? '재고 요청' : '약품 보유 요청', p ? meta(esc(p.name), esc(p.spec || '')) : '', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="sendReq"${busyAttr()}>요청 보내기</button>`);
+      : `${ext ? `<div class="note"><b>식약처 품목</b>${meta(esc(ext.name), esc(ext.company || ''), '품목기준코드 ' + esc(ext.seq), ext.code ? '보험코드 ' + esc(ext.code) : '')}</div>` : ''}<p class="hint">찾는 ${sup ? '의료소모품' : '약품'}이 목록에 없으면 알려 주세요. 원윤메디팜이 확인해서 보유 여부를 안내해 드려요.</p>
+      <div class="fgrid">${sup
+        ? `${mf('품목 이름', 'name', { req: true, full: true, af: true, ph: '예: 일회용 주사기 3cc 23G' })}${mf('규격 (선택)', 'spec', { ph: '예: 100개/박스' })}${mf('제조사 (선택)', 'maker')}${mf('필요 수량 (선택)', 'qty', { ph: '예: 한 달 5박스' })}${mf('메모 (선택)', 'memo', { ph: '예: 지금 쓰는 제품, 대체품 가능 여부' })}`
+        : `${mf('약품 이름', 'name', { req: true, full: true, af: true, ph: '예: 리피토정 10mg' })}${mf('규격 (선택)', 'spec', { ph: '예: 10mg/1정' })}${mf('제조사 (선택)', 'maker')}${mf('필요 수량 (선택)', 'qty', { ph: '예: 한 달 300정' })}${mf('메모 (선택)', 'memo', { ph: '예: 보험코드, 대체약 가능 여부' })}`}</div>`;
+    return frame(p ? '재고 요청' : sup ? '의료소모품 보유 요청' : '약품 보유 요청', p ? meta(esc(p.name), esc(p.spec || '')) : '', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="sendReq"${busyAttr()}>요청 보내기</button>`);
   },
   reqAdmin() {
     const r = S.reqs.get(M.data.id); if (!r) return frame('재고 요청', '', '<p class="muted">요청을 찾을 수 없어요.</p>');
@@ -1102,7 +1127,8 @@ const MODALS = {
   orderx() {
     const r = M.data; const inCart = Object.keys(cartOf(custCtx().account_id).lines).length;
     const u = p => esc(p.unit || '개');
-    const okRows = r.ok.map(a => `<tr><td><div class="t">${esc(a.p.name)}</div><div class="s">${esc(a.p.spec || '')}</div></td><td class="num nowrap"><b>${won(a.qty)}</b>${u(a.p)}</td><td class="s">${a.adj ? `주문 단위(${won(a.p.step)}${u(a.p)})에 맞춰 ${won(a.want)} → ${won(a.qty)}` : ''}${a.how === 'part' ? `${a.adj ? '<br>' : ''}<span class="tag warn">이름 일부로 찾음</span> 맞는지 확인해 주세요` : ''}</td></tr>`).join('');
+    const okL = [...r.ok].sort((a, b) => byKind(a.p, b.p)); const multi = new Set(okL.map(a => kindOf(a.p))).size > 1;
+    const okRows = okL.map((a, i) => `${multi && (i === 0 || kindOf(okL[i - 1].p) !== kindOf(a.p)) ? `<tr class="grp-row"><td colspan="3">${esc(kindOf(a.p))} <span>${okL.filter(x => kindOf(x.p) === kindOf(a.p)).length}품목</span></td></tr>` : ''}<tr><td><div class="t">${esc(a.p.name)}</div><div class="s">${esc(a.p.spec || '')}</div></td><td class="num nowrap"><b>${won(a.qty)}</b>${u(a.p)}</td><td class="s">${a.adj ? `주문 단위(${won(a.p.step)}${u(a.p)})에 맞춰 ${won(a.want)} → ${won(a.qty)}` : ''}${a.how === 'part' ? `${a.adj ? '<br>' : ''}<span class="tag warn">이름 일부로 찾음</span> 맞는지 확인해 주세요` : ''}</td></tr>`).join('');
     const body = `<div class="note info">${esc(r.file)} · 담을 품목 ${r.ok.length}개${r.out.length ? ` · 품절 ${r.out.length}개` : ''}${r.miss.length ? ` · 못 찾은 품목 ${r.miss.length}개` : ''}</div>
       ${r.ok.length ? `<div class="tbl-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th>품목</th><th class="num">수량</th><th>확인할 점</th></tr></thead><tbody>${okRows}</tbody></table></div>` : ''}
       ${r.out.length ? `<div class="stack" style="gap:6px"><div class="sec-t">품절이라 담지 않아요</div><ul class="list panel">${r.out.map(a => `<li class="li"><div class="li-main"><div class="li-t">${esc(a.p.name)}</div><div class="li-s">${won(a.qty)}${u(a.p)}${myOpenReq(a.p.id) ? ' · 재고 요청함' : ''}</div></div></li>`).join('')}</ul><p class="hint">주문하기 화면에서 이 품목의 '재고 요청'을 누르면 입고될 때 알려 드려요.</p></div>` : ''}
@@ -1194,12 +1220,13 @@ const A = {
   cview(d) { S.cview = d.v; S.ui.np = {}; if (d.v === 'reqs') LS.set(reqSeenKey(), new Date().toISOString()); render(); window.scrollTo(0, 0); },
   rqStatus(d) { S.ui.rqStatus = d.s; render(); },
   reqStock(d) { const p = S.products.get(d.id); if (!p) return; openModal('stockReq', { pid: p.id }, { qty: '', memo: '' }); },
-  reqNew() { openModal('stockReq', {}, { name: S.ui.shopQ.trim(), spec: '', maker: '', qty: '', memo: '' }); },
+  reqNew() { openModal('stockReq', { kind: S.ui.shopKind }, { name: S.ui.shopQ.trim(), spec: '', maker: '', qty: '', memo: '' }); },
   async sendReq() {
     const d = M.draft; const pid = M.data.pid || null; const name = String(d.name || '').trim();
-    if (!pid && name.length < 2) return toast('약품 이름을 2자 이상 입력해 주세요', 'bad');
-    const ext = M.data.ext || {};
-    const ok = await run(() => rpc('request_stock2', { p_product_id: pid, p_name: name, p_spec: String(d.spec || '').trim(), p_maker: String(d.maker || '').trim(), p_qty: String(d.qty || '').trim(), p_memo: String(d.memo || '').trim(), p_ext_seq: ext.seq || '', p_ext_code: ext.code || '' }), pid ? '재고를 요청했어요. 입고되면 바로 알려 드려요' : '보유를 요청했어요. 확인 후 안내해 드려요');
+    const sup = !pid && !M.data.ext && M.data.kind === '의료소모품';
+    if (!pid && name.length < 2) return toast(`${sup ? '품목' : '약품'} 이름을 2자 이상 입력해 주세요`, 'bad');
+    const ext = M.data.ext || {}; const memo = [sup ? '[의료소모품]' : '', String(d.memo || '').trim()].filter(Boolean).join(' ');
+    const ok = await run(() => rpc('request_stock2', { p_product_id: pid, p_name: name, p_spec: String(d.spec || '').trim(), p_maker: String(d.maker || '').trim(), p_qty: String(d.qty || '').trim(), p_memo: memo, p_ext_seq: ext.seq || '', p_ext_code: ext.code || '' }), pid ? '재고를 요청했어요. 입고되면 바로 알려 드려요' : '보유를 요청했어요. 확인 후 안내해 드려요');
     if (ok) { closeModal(); reload('reqs', 'products'); }
   },
   async cancelReq(d) {
@@ -1209,8 +1236,9 @@ const A = {
   },
   orderReq(d) {
     const r = S.reqs.get(d.id); if (!r) return;
-    Object.assign(S.ui, { shopQ: r.name, shopChip: '전체', shopGroup: '' }); S.cview = 'shop'; render(); window.scrollTo(0, 0);
-    setTimeout(() => document.getElementById('q-' + r.product_id)?.focus(), 0); drugSoon('shop');
+    const p = r.product_id ? S.products.get(r.product_id) : null;
+    Object.assign(S.ui, { shopQ: r.name, shopChip: '전체', shopGroup: '', shopKind: p ? kindOf(p) : S.ui.shopKind }); S.cview = 'shop'; render(); window.scrollTo(0, 0);
+    setTimeout(() => document.getElementById('q-' + r.product_id)?.focus(), 0); if (kindOf(p) === '의약품') drugSoon('shop');
   },
   openReq(d) { const r = S.reqs.get(d.id); if (!r) return; openModal('reqAdmin', { id: r.id }, { admin_memo: r.admin_memo || '' }); },
   async setReq(d) {
@@ -1239,6 +1267,12 @@ const A = {
     Object.assign(M.draft, { name: x.name, spec: String(x.strength || '').slice(0, 60), maker: x.company || '', code: (x.edi || [])[0] || '' }); renderModal();
   },
   shopChip(d) { S.ui.shopChip = d.c; render(); },
+  pkind(d) { S.ui.pkind = d.k || ''; S.ui.pgroup = ''; render(); },
+  shopKind(d) {
+    if (!KINDS.includes(d.k) || S.ui.shopKind === d.k) return;
+    S.ui.shopKind = d.k; S.ui.shopGroup = ''; LS.set('shopKind', d.k); render();
+    if (d.k === '의약품' && S.ui.shopQ.trim()) drugSoon('shop');
+  },
   fav(d) { S.favs.has(d.id) ? S.favs.delete(d.id) : S.favs.add(d.id); LS.set('favs', [...S.favs]); render(); },
   qty(d) { const c = cartOf(d.key); setQty(d.key, d.id, (c.lines[d.id] || 0) + num(d.d)); render(); },
   rmLine(d) { setQty(d.key, d.id, 0); render(); },
@@ -1593,29 +1627,41 @@ document.getElementById('xlsx-in').addEventListener('change', e => {
 /* 거래처 엑셀 주문: 양식 내려받기 · 올려서 장바구니 채우기 */
 function exportOrderTemplate() {
   const ctx = custCtx(); const withPrice = custPrices();
-  const list = products().filter(p => p.active !== false).sort((a, b) => ko(a.kind || '의약품', b.kind || '의약품') || ko(a.name, b.name));
-  const head = ['보험코드', '제품명', '규격', '단위', '주문 단위', ...(withPrice ? ['단가'] : []), '수량', '비고'];
-  const rows = [head, ...list.map(p => [p.code || '', p.name, p.spec || '', p.unit || '개', Math.max(1, num(p.step) || 1), ...(withPrice ? [priceFor(p, ctx)] : []), '', orderable(p) ? '' : '품절'])];
+  const act = products().filter(p => p.active !== false);
+  const kinds = KINDS.filter(k => act.some(p => kindOf(p) === k));
+  const sheets = kinds.map(k => {
+    const list = act.filter(p => kindOf(p) === k).sort((a, b) => ko(a.grp || '', b.grp || '') || ko(a.name, b.name));
+    const drug = k === '의약품';
+    const head = [...(drug ? ['보험코드'] : []), '제품명', '규격', drug ? '효능군' : '분류', '단위', '주문 단위', ...(withPrice ? ['단가'] : []), '수량', '비고'];
+    const rows = [head, ...list.map(p => [...(drug ? [p.code || ''] : []), p.name, p.spec || '', p.grp || '', p.unit || '개', Math.max(1, num(p.step) || 1), ...(withPrice ? [priceFor(p, ctx)] : []), '', orderable(p) ? '' : '품절'])];
+    return { name: k, rows, cols: [...(drug ? [12] : []), 46, 24, 18, 6, 9, ...(withPrice ? [9] : []), 8, 8] };
+  });
   const guide = [['원윤메디팜 주문서 작성 방법'], [''],
-    ['1. 「주문서」 시트의 「수량」 칸에 주문할 수량만 적어 주세요. 빈 칸은 주문하지 않아요.'],
+    [`1. ${kinds.map(k => `「${k}」`).join('·')} 시트의 「수량」 칸에 주문할 수량만 적어 주세요. 빈 칸은 주문하지 않아요. 두 시트를 함께 적어 한 번에 올려도 돼요.`],
     ['2. 「주문 단위」가 100이면 100, 200처럼 그 배수로 주문돼요. 배수가 아니면 올림해서 담겨요.'],
-    ['3. 목록에 없는 약품은 맨 아래 줄에 제품명과 수량을 적어 주세요. 올리면 「못 찾은 품목」으로 알려 드려요.'],
+    ['3. 목록에 없는 품목은 해당 시트 맨 아래 줄에 제품명과 수량을 적어 주세요. 올리면 「못 찾은 품목」으로 알려 드려요.'],
     ['4. 사이트 주문하기 → 「엑셀로 담기」로 올리면 장바구니에 담겨요. 확인한 뒤 「주문 접수하기」를 눌러야 주문돼요.'], [''],
     ['보험코드나 제품명으로 품목을 찾아요. 다른 곳에서 쓰던 엑셀도 「제품명」(또는 보험코드)과 「수량」 칸이 있으면 올릴 수 있어요.']];
-  saveXlsx(`원윤메디팜_주문서_${today().replace(/-/g, '')}.xlsx`, [{ name: '주문서', rows, cols: [12, 46, 24, 6, 9, ...(withPrice ? [9] : []), 8, 8] }, { name: '작성 방법', rows: guide, cols: [110] }]);
+  saveXlsx(`원윤메디팜_주문서_${today().replace(/-/g, '')}.xlsx`, [...sheets, { name: '작성 방법', rows: guide, cols: [110] }]);
 }
-function parseOrderRows(rows) {
+// sheets: 시트마다 행 배열. 제목 줄이 있는 시트를 모두 읽어 합침 (의약품·의료소모품 시트)
+function parseOrderRows(sheets) {
   const cl = v => String(v ?? '').replace(/\s/g, '');
   const NAME = ['제품명', '품목명', '약품명', '상품명', '약제명', '품명', '제품', '품목', '적요'], CODE = ['보험코드', '코드', 'EDI', 'EDI코드', '보험코드(EDI)', '제품코드', '약품코드'], QTY = ['수량', '주문수량', '발주수량', '요청수량', '주문량'];
-  const hi = rows.findIndex(r => Array.isArray(r) && r.some(c => QTY.includes(cl(c))) && r.some(c => NAME.includes(cl(c)) || CODE.includes(cl(c))));
-  if (hi < 0) return { error: '「제품명」(또는 보험코드)과 「수량」 칸이 있는 제목 줄을 찾지 못했어요. 「주문서 양식 받기」로 받은 양식을 써 주세요.' };
-  const H = rows[hi].map(cl); const col = list => H.findIndex(h => list.includes(h));
-  const c = { name: col(NAME), code: col(CODE), spec: col(['규격']), qty: col(QTY) };
+  const found = [];
+  for (const rows of sheets) {
+    if (!Array.isArray(rows)) continue;
+    const hi = rows.findIndex(r => Array.isArray(r) && r.some(c => QTY.includes(cl(c))) && r.some(c => NAME.includes(cl(c)) || CODE.includes(cl(c))));
+    if (hi < 0) continue;
+    const H = rows[hi].map(cl); const col = list => H.findIndex(h => list.includes(h));
+    found.push({ rows: rows.slice(hi + 1), c: { name: col(NAME), code: col(CODE), spec: col(['규격']), qty: col(QTY) } });
+  }
+  if (!found.length) return { error: '「제품명」(또는 보험코드)과 「수량」 칸이 있는 제목 줄을 찾지 못했어요. 「주문서 양식 받기」로 받은 양식을 써 주세요.' };
   const act = products().filter(p => p.active !== false);
   const byCode = new Map(); for (const p of act) if (p.code) byCode.set(normCode(p.code), p);
   const byName = new Map(); for (const p of act) { const k = normN(p.name); if (!byName.has(k)) byName.set(k, []); byName.get(k).push(p); }
   const agg = new Map(); const miss = [];
-  for (const r of rows.slice(hi + 1)) {
+  for (const { rows, c } of found) for (const r of rows) {
     if (!Array.isArray(r)) continue;
     const name = c.name >= 0 ? String(r[c.name] ?? '').trim() : ''; const code = c.code >= 0 ? normCode(r[c.code]) : ''; const spec = c.spec >= 0 ? String(r[c.spec] ?? '').trim() : '';
     const qty = Math.floor(num(String(r[c.qty] ?? '').replace(/[^\d.]/g, '')));
@@ -1640,8 +1686,8 @@ document.getElementById('order-xlsx-in').addEventListener('change', e => {
   const rd = new FileReader();
   rd.onload = () => {
     try {
-      const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array' }); let res = null;
-      for (const n of wb.SheetNames) { const r = parseOrderRows(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null })); if (!r.error) { res = r; break; } res = res || r; }
+      const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array' });
+      const res = parseOrderRows(wb.SheetNames.map(n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null })));
       if (!res || res.error) return toast((res && res.error) || '엑셀 파일을 읽지 못했어요', 'bad');
       openModal('orderx', { ...res, file: f.name }, { clear: false }, { live: true, size: 'wide' });
     } catch (err) { console.warn(err); toast('엑셀 파일을 읽지 못했어요', 'bad'); }
@@ -1708,8 +1754,8 @@ document.getElementById('rcv-xlsx-in').addEventListener('change', e => {
   rd.readAsArrayBuffer(f);
 });
 function exportRcvTemplate() {
-  const list = products().sort((a, b) => ko(a.kind || '의약품', b.kind || '의약품') || ko(a.name, b.name));
-  const rows = [['보험코드', '제품명', '규격', '단위', '현재고', '수량', '매입가', '로트번호', '유효기간'], ...list.map(p => [p.code || '', p.name, p.spec || '', p.unit || '개', p.track ? num(p.stock) : '', '', costOf(p) || '', '', ''])];
+  const list = products().sort((a, b) => byKind(a, b) || ko(a.name, b.name));
+  const rows = [['구분', '보험코드', '제품명', '규격', '단위', '현재고', '수량', '매입가', '로트번호', '유효기간'], ...list.map(p => [kindOf(p), p.code || '', p.name, p.spec || '', p.unit || '개', p.track ? num(p.stock) : '', '', costOf(p) || '', '', ''])];
   const guide = [['원윤메디팜 입고 양식 작성 방법'], [''],
     ['1. 들어온 품목의 「수량」을 적어 주세요. 수량이 빈 줄은 입고하지 않아요.'],
     ['2. 「매입가」는 1단위(정·캡슐·개 등) 가격이에요. 적으면 최근 매입가로 저장돼 재고 금액과 마진 계산에 쓰여요.'],
@@ -1717,10 +1763,10 @@ function exportRcvTemplate() {
     ['4. 같은 품목이라도 로트가 여러 개면 줄을 복사해 로트마다 한 줄씩 적어 주세요.'],
     ['5. 재고 관리 → 입고 → 「거래명세서 엑셀 불러오기」로 올리면 입고 전표에 들어가요. 확인한 뒤 「입고 등록」을 눌러야 재고에 반영돼요.'], [''],
     ['처음 사이트를 쓸 때 지금 창고에 있는 재고를 이 양식으로 한 번에 넣으면 돼요. 매입처 거래명세서 엑셀도 제품명·수량 칸이 있으면 그대로 불러올 수 있어요.']];
-  saveXlsx(`원윤메디팜_입고양식_${today().replace(/-/g, '')}.xlsx`, [{ name: '입고', rows, cols: [12, 46, 22, 6, 8, 8, 9, 14, 12] }, { name: '작성 방법', rows: guide, cols: [110] }]);
+  saveXlsx(`원윤메디팜_입고양식_${today().replace(/-/g, '')}.xlsx`, [{ name: '입고', rows, cols: [10, 12, 46, 22, 6, 8, 8, 9, 14, 12] }, { name: '작성 방법', rows: guide, cols: [110] }]);
 }
 function exportStock() {
-  const tracked = products().filter(p => p.track).sort((a, b) => ko(a.name, b.name));
+  const tracked = products().filter(p => p.track).sort((a, b) => byKind(a, b) || ko(a.name, b.name));
   if (!tracked.length) return toast('재고를 관리하는 품목이 아직 없어요', 'bad');
   const r1 = [['구분', '보험코드', '제품명', '규격', '단위', '현재고', '안전재고', '가까운 유효기간', '매입가', '재고 금액', '판매가', '마진율(%)', '매입처']];
   for (const p of tracked) { const lot = liveLots(p)[0]; const c = costOf(p); const m = margin(p.price, c); r1.push([p.kind || '의약품', p.code || '', p.name, p.spec || '', p.unit || '', num(p.stock), num(p.safety) || '', lot?.exp || '', c || '', c ? c * Math.max(0, num(p.stock)) : '', num(p.price), m ? m.pct : '', supName(S.costs.get(p.id)?.supplier_id)]); }
@@ -1769,7 +1815,7 @@ function exportInvoices() {
 }
 function exportProducts() {
   const rows = [['구분', '효능군·분류', '보험코드', '표준코드', '제품명', '규격', '제조사', '판매단위', '주문 배수', '기준가', '판매가', '재고 관리', '재고', '안전재고', '처방 통계 월', '총 처방량', '가까운 유효기간', '판매 중']];
-  for (const p of products().sort((a, b) => ko(a.name, b.name))) { const lot = liveLots(p)[0]; const rx = S.rx.get(p.id); rows.push([p.kind || '의약품', p.grp, p.code, p.std, p.name, p.spec, p.maker, p.unit, num(p.step) || 1, num(p.base_price), num(p.price), p.track ? 'Y' : 'N', p.track ? num(p.stock) : '', num(p.safety) || '', rx?.month || '', rx ? num(rx.qty) : '', lot?.exp || '', p.active === false ? 'N' : 'Y']); }
+  for (const p of products().sort((a, b) => byKind(a, b) || ko(a.name, b.name))) { const lot = liveLots(p)[0]; const rx = S.rx.get(p.id); rows.push([p.kind || '의약품', p.grp, p.code, p.std, p.name, p.spec, p.maker, p.unit, num(p.step) || 1, num(p.base_price), num(p.price), p.track ? 'Y' : 'N', p.track ? num(p.stock) : '', num(p.safety) || '', rx?.month || '', rx ? num(rx.qty) : '', lot?.exp || '', p.active === false ? 'N' : 'Y']); }
   saveXlsx(`원윤메디팜_상품재고_${today().replace(/-/g, '')}.xlsx`, [{ name: '상품', rows, cols: [9, 18, 11, 15, 32, 16, 12, 7, 7, 8, 8, 7, 8, 8, 10, 9, 12, 6] }]);
 }
 function exportStatement(o) {
@@ -1812,7 +1858,7 @@ document.addEventListener('input', e => {
     if (el.dataset.live != null) renderModal();
     return;
   }
-  if (el.dataset.bind != null) { setPath(S.ui, el.dataset.bind, val); if (el.dataset.bind.startsWith('rcv.')) saveRcv(); if (el.dataset.bind === 'shopQ') drugSoon('shop'); if (el.dataset.norender == null) schedule(); return; }
+  if (el.dataset.bind != null) { setPath(S.ui, el.dataset.bind, val); if (el.dataset.bind.startsWith('rcv.')) saveRcv(); if (el.dataset.bind === 'shopQ' && S.ui.shopKind !== '의료소모품') drugSoon('shop'); if (el.dataset.norender == null) schedule(); return; }
   if (el.dataset.cartqty != null) { setQty(el.dataset.key, el.dataset.cartqty, val); schedule(); return; }
   if (el.dataset.cart != null) { const c = cartOf(el.dataset.key); c[el.dataset.cart] = val; saveCart(el.dataset.key); }
 });
