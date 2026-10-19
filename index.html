@@ -139,6 +139,18 @@ textarea.inp{min-height:76px;resize:vertical;line-height:1.5}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chips-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
 .xl-acts{display:flex;flex-wrap:wrap;gap:8px}
+.rcv-find{display:grid;gap:6px}
+.rcv-res{border:1px solid var(--rule);border-radius:6px;background:var(--sheet);max-height:320px;overflow:auto}
+.rcv-opt{display:grid;gap:2px;width:100%;text-align:left;padding:10px 14px;border:0;border-bottom:1px solid var(--rule);background:transparent;font:inherit;color:inherit;cursor:pointer}
+.rcv-opt:last-child{border-bottom:0}
+.rcv-opt:hover,.rcv-opt:focus-visible{background:var(--gold-tint)}
+.rcv-opt .t{font-weight:600}
+.rcv-opt .s{font-size:12.5px;color:var(--ink-3)}
+td.pos{color:var(--ok)}
+.neg,td.neg{color:var(--bad)}
+.hist-f{align-items:flex-end}
+.hist-f .fld{flex:0 0 auto;width:auto}
+.hist-f .fld.grow{flex:1 1 220px}
 .chip{border:1px solid var(--rule-2);background:transparent;color:var(--ink-2);padding:6px 14px;border-radius:999px;font-weight:500;font-size:13.5px;cursor:pointer;white-space:nowrap}
 .chip:hover{border-color:var(--ink-3)}
 .chip.on{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
@@ -146,7 +158,7 @@ textarea.inp{min-height:76px;resize:vertical;line-height:1.5}
 /* surfaces — 종이 한 장 */
 .panel{background:var(--sheet);border:1px solid var(--rule);border-radius:6px;min-width:0}
 .panel-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--rule)}
-.panel-h h2{font-family:var(--f-head);font-size:17px;font-weight:500;letter-spacing:0}
+.panel-h h2{font-family:var(--f-head);font-size:17px;font-weight:500;letter-spacing:0;white-space:nowrap}
 .panel-b{padding:16px 20px}
 /* 요약 수치: 상자 대신 장부 한 줄 */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr));background:var(--sheet);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
@@ -443,9 +455,10 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 <div id="toast" class="toasts" role="status" aria-live="polite"></div>
 <input type="file" id="xlsx-in" accept=".xlsx,.xls,.csv" hidden>
 <input type="file" id="order-xlsx-in" accept=".xlsx,.xls,.csv" hidden>
+<input type="file" id="rcv-xlsx-in" accept=".xlsx,.xls,.csv" hidden>
 <noscript><p style="padding:24px">자바스크립트를 켜야 주문 사이트를 쓸 수 있어요.</p></noscript>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

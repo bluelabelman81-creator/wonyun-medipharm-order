@@ -47,6 +47,8 @@ function guessUnit(spec) { const last = String(spec || '').split('/').pop(); if 
 function monthEnd(m) { const [y, mo] = m.split('-').map(Number); return ymd(new Date(y, mo, 0)); }
 function invoiceDeadline(m) { const [y, mo] = m.split('-').map(Number); return ymd(new Date(y, mo, 10)); }
 function bizFmt(s) { const d = digits(s); return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}` : (s || ''); }
+function newRcv(sup = '') { return { sup, date: today(), memo: '', lines: [] }; }
+const saveRcv = () => LS.set('rcv', S.ui.rcv);
 function tempPassword() { const a = 'abcdefghjkmnpqrstuvwxyz', n = '23456789'; let s = ''; const r = crypto.getRandomValues(new Uint32Array(10)); for (let i = 0; i < 10; i++) s += (i < 4 ? a : n)[r[i] % (i < 4 ? a.length : n.length)]; return s; }
 
 const ST = { '접수': ['st-new', '접수'], '확인': ['st-conf', '주문확인'], '출고': ['st-ship', '출고완료'], '완료': ['st-done', '배송완료'], '취소': ['st-cancel', '취소'] };
@@ -63,12 +65,13 @@ const PAY_METHODS = ['계좌이체', '카드', '현금', '어음', '상계'];
 const S = {
   phase: 'loading', user: null, profile: null,
   settings: {}, products: new Map(), rx: new Map(), accounts: new Map(), profiles: new Map(), special: new Map(),
-  orders: new Map(), shipments: new Map(), payments: new Map(), moves: new Map(), invoices: new Map(), reqs: new Map(), taxcfg: {}, tax: null,
+  orders: new Map(), shipments: new Map(), payments: new Map(), moves: new Map(), invoices: new Map(), reqs: new Map(), suppliers: new Map(), costs: new Map(), receipts: new Map(), hist: null, taxcfg: {}, tax: null,
   myAccount: null, busy: false, view: LS.get('view', 'dash'), cview: 'shop',
   ui: {
     lg: { id: '', pw: '' }, su: {}, np: {},
     ostatus: '접수', oq: '', pq: '', pkind: '', pgroup: '', aq: '',
     shopQ: '', shopChip: '전체', shopGroup: '',
+    stab: LS.get('stab', '현황'), sq: '', sexp: 180, rcv: LS.get('rcv', null), rcvQ: '', hFrom: thisMonth() + '-01', hTo: today(), hType: '', hq: '', supQ: '',
     exFrom: thisMonth() + '-01', exTo: today(), settleMonth: thisMonth(),
     invMonth: (new Date().getDate() <= 10 ? prevMonth() : thisMonth()), invStatus: '',
     rqStatus: '대기', rqq: '', drugMore: false, drugTestQ: '타이레놀', setd: null, open: {}, armed: '', lastCreds: null
@@ -76,6 +79,8 @@ const S = {
   cart: {}, favs: new Set(LS.get('favs', [])),
   drugOn: null, dq: {}, drugCache: new Map(), drugItems: new Map()
 };
+if (!S.ui.rcv || !Array.isArray(S.ui.rcv.lines)) S.ui.rcv = newRcv();
+if (!S.ui.rcv.lines.length) S.ui.rcv.date = today();
 const M = { kind: null, data: null, draft: {}, live: false, size: '', busy: false, armed: '' };
 
 /* ---------- render plumbing ---------- */
@@ -141,7 +146,10 @@ const L = {
   moves: async () => mapInto(S.moves, await q(sb.from('stock_moves').select('*').order('created_at', { ascending: false }).limit(300))),
   invoices: async () => mapInto(S.invoices, await q(sb.from('tax_invoices').select('*').order('created_at', { ascending: false }).limit(1000))),
   reqs: async () => mapInto(S.reqs, await q(sb.from('stock_requests').select('*').order('created_at', { ascending: false }).limit(1000))),
-  taxcfg: async () => { S.taxcfg = (await q(sb.from('tax_config').select('*').eq('id', 1).maybeSingle())) || {}; }
+  taxcfg: async () => { S.taxcfg = (await q(sb.from('tax_config').select('*').eq('id', 1).maybeSingle())) || {}; },
+  suppliers: async () => mapInto(S.suppliers, await q(sb.from('suppliers').select('*').order('name'))),
+  costs: async () => mapInto(S.costs, await q(sb.from('product_costs').select('*')), 'product_id'),
+  receipts: async () => mapInto(S.receipts, await q(sb.from('receipts').select('*').order('receipt_date', { ascending: false }).order('created_at', { ascending: false }).limit(500)))
 };
 async function reload(...names) {
   try { await Promise.all(names.map(n => L[n] && L[n]())); } catch (e) { console.warn('reload', names, e); toast(errMsg(e), 'bad'); }
@@ -180,7 +188,7 @@ async function enter(user) {
     if (!S.profile.active) { await sb.auth.signOut(); S.phase = 'login'; render(); toast('사용이 중지된 계정이에요. 원윤메디팜에 문의해 주세요.', 'bad'); return; }
     if (S.profile.temp_pw) { S.phase = 'temppw'; render(); return; }
     if (S.profile.role === 'admin') {
-      await Promise.all([L.settings(), L.products(), L.rx(), L.accounts(), L.profiles(), L.special(), L.orders(), L.shipments(), L.payments(), L.moves(), L.invoices(), L.reqs(), L.taxcfg()]);
+      await Promise.all([L.settings(), L.products(), L.rx(), L.accounts(), L.profiles(), L.special(), L.orders(), L.shipments(), L.payments(), L.moves(), L.invoices(), L.reqs(), L.taxcfg(), L.suppliers(), L.costs(), L.receipts()]);
       S.phase = 'admin';
       loadTaxStatus(false);
     } else {
@@ -394,13 +402,13 @@ const meta = (...xs) => `<span class="meta">${xs.filter(Boolean).map(x => `<span
 const head = (title, sub = '', actions = '') => `<header class="ph"><div><h1>${title}</h1>${sub ? `<p class="ph-sub">${sub}</p>` : ''}</div>${actions ? `<div class="ph-act">${actions}</div>` : ''}</header>`;
 
 /* ---------- admin ---------- */
-const NAV = [['dash', '현황'], ['orders', '주문 처리'], ['products', '상품·재고'], ['reqs', '재고 요청'], ['accounts', '거래처'], ['invoices', '세금계산서'], ['settle', '정산·미수'], ['export', '엑셀 내려받기'], ['settings', '설정']];
+const NAV = [['dash', '현황'], ['orders', '주문 처리'], ['products', '상품·재고'], ['stock', '재고 관리'], ['reqs', '재고 요청'], ['accounts', '거래처'], ['invoices', '세금계산서'], ['settle', '정산·미수'], ['export', '엑셀 내려받기'], ['settings', '설정']];
 function adminView() {
   const all = allOrders();
   const invWait = [...S.invoices.values()].filter(t => t.status === '대기' || t.status === '실패' || t.status === '발행중').length;
-  const counts = { orders: all.filter(o => o.status === '접수' || o.status === '확인').length, invoices: invWait, reqs: pendingReqCount() };
+  const counts = { orders: all.filter(o => o.status === '접수' || o.status === '확인').length, invoices: invWait, reqs: pendingReqCount(), stock: stockBadCount() };
   const v = NAV.some(n => n[0] === S.view) ? S.view : 'dash';
-  const body = { dash: dashView, orders: ordersView, products: productsView, reqs: reqsView, accounts: accountsView, invoices: invoicesView, settle: settleView, export: exportView, settings: settingsView }[v]();
+  const body = { dash: dashView, orders: ordersView, products: productsView, stock: stockView, reqs: reqsView, accounts: accountsView, invoices: invoicesView, settle: settleView, export: exportView, settings: settingsView }[v]();
   return `<div class="shell"><aside class="side"><div class="side-top">${brand('관리자')}<button class="btn sm m-logout" data-act="logout">로그아웃</button></div><nav class="nav" aria-label="관리 메뉴">${NAV.map(([k, l]) => `<button class="nav-i${v === k ? ' on' : ''}" data-act="go" data-v="${k}"${v === k ? ' aria-current="page"' : ''}>${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('')}</nav><div class="side-foot"><span><b>${esc(S.profile.name || S.profile.login_id)}</b> 관리자</span><button class="linkbtn" data-act="logout">로그아웃</button></div></aside><main class="main">${body}</main></div>`;
 }
 
@@ -441,9 +449,9 @@ function dashView() {
         </section>
         <section class="panel"><div class="panel-h"><h2>이번 달 일별 출고액</h2><span class="muted tabnum">${m.replace('-', '.')}</span></div><div class="panel-b">${monthChart()}</div></section>
       </div>
-      <section class="panel"><div class="panel-h"><h2>재고·유효기간 점검</h2><button class="btn sm ghost" data-act="go" data-v="products">상품·재고</button></div>
+      <section class="panel"><div class="panel-h"><h2>재고·유효기간 점검</h2><button class="btn sm ghost" data-act="go" data-v="stock">재고 관리</button></div>
         ${alerts.length ? `<ul class="list">${alerts.slice(0, 8).map(a => `<li class="li click" data-act="editStock" data-id="${esc(a.p.id)}" role="button" tabindex="0"><div class="li-main"><div class="li-t">${esc(a.p.name)}</div><div class="li-s">${esc(a.sub)}</div></div><span class="tag ${a.tone}">${esc(a.label)}</span></li>`).join('')}</ul>`
-          : `<div class="empty"><b>${products().some(p => p.track) ? '점검할 품목이 없어요' : '재고를 관리하는 품목이 아직 없어요'}</b>${products().some(p => p.track) ? '품절·안전재고 미만·유효기간 180일 이내 품목이 여기에 떠요.' : '상품·재고에서 입고를 등록하면 재고와 유효기간을 추적해요.'}</div>`}
+          : `<div class="empty"><b>${products().some(p => p.track) ? '점검할 품목이 없어요' : '재고를 관리하는 품목이 아직 없어요'}</b>${products().some(p => p.track) ? '품절·안전재고 미만·유효기간 180일 이내 품목이 여기에 떠요.' : '재고 관리 → 입고에서 입고를 등록하면 재고와 유효기간을 추적해요.'}</div>`}
       </section>
     </div>
   </div>`;
@@ -522,6 +530,134 @@ function productsView() {
     </tbody></table></div>` : `<div class="panel"><div class="empty"><b>${S.products.size ? '조건에 맞는 상품이 없어요' : '등록된 상품이 없어요'}</b>${S.products.size ? '검색어나 필터를 바꿔 보세요.' : '상품 추가나 엑셀 올리기로 상품을 등록하세요.'}</div></div>`}
     <p class="hint">엑셀 올리기: 매달 받는 원외처방 통계 엑셀(구분·코드·약제명·단가·총 처방량)을 그대로 올리면 처방량과 기준가가 갱신되고, 없는 품목은 새로 추가돼요. 의료소모품은 제품명·규격·판매가 열이 있는 엑셀도 올릴 수 있어요.</p>
   </div>`;
+}
+
+/* ---------- 재고 관리 (관리자) ---------- */
+const STABS = [['현황', '현황'], ['입고', '입고'], ['내역', '입출고 내역'], ['매입처', '매입처']];
+const MOVE_TYPES = ['입고', '출고', '반품 입고', '폐기', '실사 조정', '입고 취소'];
+const costOf = p => num(S.costs.get(p.id)?.cost);
+const supName = id => (id && S.suppliers.get(id)?.name) || '';
+function margin(price, cost) { price = num(price); cost = num(cost); if (!(price > 0) || !(cost > 0)) return null; return { amt: price - cost, pct: Math.round((price - cost) / price * 1000) / 10 }; }
+const mvTone = t => t === '입고' || t === '반품 입고' ? 'ok' : t === '출고' ? 'info' : t === '폐기' || t === '입고 취소' ? 'bad' : '';
+function stockBadCount() { let n = 0; for (const p of products()) { if (!p.track || p.active === false) continue; if (num(p.stock) <= 0) { n++; continue; } const lot = liveLots(p)[0]; if (lot && lot.exp && daysUntil(lot.exp) <= 60) n++; } return n; }
+function stockView() {
+  const t = STABS.some(x => x[0] === S.ui.stab) ? S.ui.stab : '현황';
+  const act = t === '현황' ? `<button class="btn" data-act="exStock">재고 엑셀</button><button class="btn primary" data-act="stab" data-s="입고">입고 등록</button>`
+    : t === '내역' ? `<button class="btn" data-act="exHist">엑셀 내려받기</button>`
+    : t === '매입처' ? `<button class="btn primary" data-act="newSupplier">매입처 추가</button>`
+    : `<button class="btn" data-act="rcvTemplate">입고 양식 받기</button>`;
+  const body = t === '입고' ? rcvTab() : t === '내역' ? histTab() : t === '매입처' ? supTab() : invTab();
+  return head('재고 관리', '재고 금액과 유효기간·부족 품목을 보고, 매입처에서 받은 물건을 한 번에 입고해요. 매입가는 관리자 화면에만 보여요.', act) + `
+  <div class="stack">
+    <div class="row"><div class="seg" role="tablist">${STABS.map(([k, l]) => `<button role="tab" aria-selected="${t === k}" class="${t === k ? 'on' : ''}" data-act="stab" data-s="${k}">${l}</button>`).join('')}</div></div>
+    ${body}
+  </div>`;
+}
+function invTab() {
+  const all = products(); const tracked = all.filter(p => p.track);
+  if (!tracked.length) return `<div class="panel"><div class="empty"><b>재고를 관리하는 품목이 아직 없어요</b>입고를 한 번 등록하면 그 품목부터 재고·유효기간·재고 금액을 추적해요. 처음에는 「입고 양식 받기」로 지금 창고에 있는 재고를 한꺼번에 넣으면 편해요.<div class="row" style="justify-content:center;margin-top:14px"><button class="btn" data-act="rcvTemplate">입고 양식 받기</button><button class="btn primary" data-act="stab" data-s="입고">입고 등록</button></div></div></div>`;
+  let value = 0, costed = 0, units = 0;
+  for (const p of tracked) { const s = Math.max(0, num(p.stock)); units += s; const c = costOf(p); if (c > 0 && s > 0) { value += c * s; costed++; } }
+  const lim = num(S.ui.sexp) || 180;
+  const exp = []; for (const p of tracked) for (const l of liveLots(p)) { if (!l.exp) continue; const d = daysUntil(l.exp); if (d <= lim) exp.push({ p, l, d }); }
+  exp.sort((a, b) => a.d - b.d);
+  const exp60 = exp.filter(x => x.d <= 60).length;
+  const shortL = tracked.filter(p => p.active !== false && (num(p.stock) <= 0 || (num(p.safety) > 0 && num(p.stock) < num(p.safety))))
+    .sort((a, b) => (num(a.stock) > 0) - (num(b.stock) > 0) || ko(a.name, b.name));
+  const outN = shortL.filter(p => num(p.stock) <= 0).length;
+  const qq = S.ui.sq.trim().toLowerCase();
+  let list = tracked; if (qq) list = list.filter(p => [p.name, p.spec, p.code, p.maker, supName(S.costs.get(p.id)?.supplier_id)].join(' ').toLowerCase().includes(qq));
+  list = [...list].sort((a, b) => ko(a.name, b.name));
+  const untracked = all.filter(p => !p.track && p.active !== false).length;
+  return `
+    <div class="kpis">
+      <div class="kpi"><span class="k">재고 관리 품목</span><span class="v">${tracked.length}<small>개</small></span><span class="s">${untracked ? `미관리 ${untracked}개 품목은 입고하면 추가돼요` : '판매 중인 전 품목'}</span></div>
+      <div class="kpi"><span class="k">재고 금액 (매입가)</span><span class="v">${won(value)}<small>원</small></span><span class="s">${costed ? `매입가가 있는 ${costed}개 품목 기준` : '매입가를 넣으면 계산돼요'}</span></div>
+      <div class="kpi${exp60 ? ' alert' : ''}"><span class="k">유효기간 60일 이내</span><span class="v">${exp60}<small>로트</small></span><span class="s">${lim}일 이내 ${exp.length}로트</span></div>
+      <div class="kpi${outN ? ' alert' : ''}"><span class="k">품절 · 부족</span><span class="v">${shortL.length}<small>품목</small></span><span class="s">${outN ? `품절 ${outN}개 포함` : '안전재고 미만 품목'}</span></div>
+    </div>
+    <div class="dgrid">
+      <section class="panel"><div class="panel-h"><h2>유효기간 임박</h2><label class="sr" for="sexp">기간</label><select class="inp sm" id="sexp" data-bind="sexp" style="width:auto">${[60, 90, 180, 365].map(n => opt(n, lim, `${n}일 이내`)).join('')}</select></div>
+        ${exp.length ? `<ul class="list" data-keep="explist" style="max-height:420px;overflow:auto">${exp.map(x => `<li class="li click" data-act="editStock" data-id="${esc(x.p.id)}" role="button" tabindex="0"><div class="li-main"><div class="li-t">${esc(x.p.name)}</div><div class="li-s">${meta(`로트 ${esc(x.l.lot || '미입력')}`, `${won(x.l.qty)}${esc(x.p.unit || '')}`, fmtD(x.l.exp))}</div></div><span class="tag ${x.d <= 60 ? 'bad' : 'warn'} tabnum">${x.d < 0 ? '지남' : 'D-' + x.d}</span></li>`).join('')}</ul>` : `<div class="empty"><b>${lim}일 안에 끝나는 로트가 없어요</b>입고할 때 유효기간을 넣어 두면 여기서 미리 알려 줘요.</div>`}
+      </section>
+      <section class="panel"><div class="panel-h"><h2>품절 · 부족</h2></div>
+        ${shortL.length ? `<ul class="list" data-keep="shortlist" style="max-height:420px;overflow:auto">${shortL.map(p => { const c = S.costs.get(p.id); const rx = num(S.rx.get(p.id)?.qty); return `<li class="li"><div class="li-main"><div class="li-t">${esc(p.name)}</div><div class="li-s">${meta(`재고 ${won(p.stock)}${num(p.safety) ? ' / 안전 ' + won(p.safety) : ''}`, rx ? `월 처방 ${won(rx)}` : '', c?.supplier_id ? esc(supName(c.supplier_id)) : '')}</div></div><span class="tag ${num(p.stock) <= 0 ? 'bad' : 'warn'}">${num(p.stock) <= 0 ? '품절' : '부족'}</span><button class="btn sm" data-act="rcvAdd" data-id="${esc(p.id)}" data-go="1">입고</button></li>`; }).join('')}</ul>` : `<div class="empty"><b>부족한 품목이 없어요</b>상품 수정에서 안전재고를 정해 두면, 그보다 적어질 때 여기에 떠요.</div>`}
+      </section>
+    </div>
+    <section class="panel"><div class="panel-h"><h2>재고 목록</h2><div class="search" style="max-width:280px"><label class="sr" for="sq">재고 검색</label><input class="inp sm" id="sq" data-bind="sq" value="${esc(S.ui.sq)}" placeholder="품목·매입처 검색"></div></div>
+      <div class="tbl-wrap" data-keep="stbl" style="border:0;border-radius:0"><table><thead><tr><th>제품명 · 규격</th><th class="num">현재고</th><th>가까운 유효기간</th><th class="num">매입가</th><th class="num">판매가</th><th class="num">마진</th><th class="num">재고 금액</th><th>매입처</th><th></th></tr></thead><tbody>
+      ${list.map(p => { const lot = liveLots(p)[0]; const dd = lot ? daysUntil(lot.exp) : Infinity; const c = costOf(p); const m = margin(p.price, c); return `<tr${p.active === false ? ' style="opacity:.55"' : ''}><td><div class="t">${esc(p.name)}</div><div class="s">${esc(p.spec || '')}${p.code ? ' · <span class="mono">' + esc(p.code) + '</span>' : ''}</div></td><td class="num">${stockTag(p)}<div class="s">${esc(p.unit || '개')}</div></td><td class="nowrap">${lot && lot.exp ? `<span class="tag ${dd <= 60 ? 'bad' : dd <= 180 ? 'warn' : ''} tabnum">${fmtD(lot.exp)}</span>` : '<span class="muted">-</span>'}</td><td class="num">${c ? won(c) : '<span class="muted">-</span>'}</td><td class="num">${won(p.price)}</td><td class="num">${m ? `<span class="${m.amt < 0 ? 'neg' : ''}">${m.pct}%</span><div class="s">${won(m.amt)}원</div>` : '<span class="muted">-</span>'}</td><td class="num">${c && num(p.stock) > 0 ? won(c * num(p.stock)) : '<span class="muted">-</span>'}</td><td class="s"><div class="cw">${esc(supName(S.costs.get(p.id)?.supplier_id))}</div></td><td class="nowrap"><button class="btn sm" data-act="editStock" data-id="${esc(p.id)}">입출고</button> <button class="btn sm ghost" data-act="editProduct" data-id="${esc(p.id)}">수정</button></td></tr>`; }).join('') || `<tr><td colspan="9" class="muted" style="text-align:center;padding:22px">검색 결과가 없어요</td></tr>`}
+      </tbody></table></div>
+    </section>
+    ${untracked ? `<p class="hint">재고를 관리하지 않는 품목 ${untracked}개는 목록에 없어요. 입고를 한 번 등록하면 그때부터 재고를 추적해요.</p>` : ''}`;
+}
+function rcvInfo() { let total = 0, n = 0; for (const l of S.ui.rcv.lines) { const qv = Math.floor(num(l.qty)); if (qv > 0) { n++; total += qv * num(l.cost); } } return { total, n }; }
+function rcvTab() {
+  const r = S.ui.rcv; const sups = [...S.suppliers.values()].filter(s => s.active !== false || s.id === r.sup).sort((a, b) => ko(a.name, b.name));
+  const qq = S.ui.rcvQ.trim().toLowerCase();
+  const res = qq ? products().filter(p => [p.name, p.spec, p.code, p.std, p.maker].join(' ').toLowerCase().includes(qq)).sort((a, b) => (b.active !== false) - (a.active !== false) || ko(a.name, b.name)).slice(0, 8) : [];
+  const info = rcvInfo();
+  const recent = [...S.receipts.values()].sort((a, b) => ko(b.receipt_date, a.receipt_date) || ko(b.created_at, a.created_at)).slice(0, 30);
+  const rows = r.lines.map((l, i) => { const p = S.products.get(l.pid); if (!p) return ''; const amt = Math.floor(num(l.qty)) * num(l.cost); const lc = costOf(p);
+    return `<tr><td><div class="t">${esc(p.name)}</div><div class="s">${meta(esc(p.spec || ''), p.track ? `재고 ${won(p.stock)}` : '재고 미관리', lc && num(l.cost) && lc !== num(l.cost) ? `지난 매입가 ${won(lc)}` : '')}</div></td>
+      <td class="nowrap"><input class="inp sm num" style="width:84px" id="rq-${i}" data-bind="rcv.lines.${i}.qty" inputmode="numeric" value="${esc(l.qty)}" placeholder="0" aria-label="${esc(p.name)} 수량"> <span class="s">${esc(p.unit || '개')}</span></td>
+      <td><input class="inp sm" style="width:110px" id="rl-${i}" data-bind="rcv.lines.${i}.lot" data-norender value="${esc(l.lot)}" placeholder="로트" aria-label="${esc(p.name)} 로트번호"></td>
+      <td><input class="inp sm" type="date" style="width:140px" id="re-${i}" data-bind="rcv.lines.${i}.exp" data-norender value="${esc(l.exp)}" aria-label="${esc(p.name)} 유효기간"></td>
+      <td><input class="inp sm num" style="width:92px" id="rc-${i}" data-bind="rcv.lines.${i}.cost" inputmode="decimal" value="${esc(l.cost)}" placeholder="0" aria-label="${esc(p.name)} 매입가"></td>
+      <td class="num nowrap">${amt ? won(amt) : '<span class="muted">-</span>'}</td>
+      <td><button class="cl-x" data-act="rcvDel" data-i="${i}" aria-label="${esc(p.name)} 줄 빼기">빼기</button></td></tr>`; }).join('');
+  return `
+    <section class="panel"><div class="panel-h"><h2>입고 전표</h2><button class="btn sm ghost" data-act="rcvXlsx">거래명세서 엑셀 불러오기</button></div>
+      <div class="panel-b stack" style="gap:16px">
+        <div class="fgrid">
+          <label class="fld" for="rcv-sup"><span>매입처</span><span class="row" style="flex-wrap:nowrap;gap:8px"><select class="inp" id="rcv-sup" data-bind="rcv.sup"><option value="">선택 안 함</option>${sups.map(s => opt(s.id, r.sup, s.name)).join('')}</select><button class="btn sm ghost" data-act="newSupplier" style="flex:none">새 매입처</button></span></label>
+          <label class="fld" for="rcv-date"><span>입고일</span><input class="inp" type="date" id="rcv-date" data-bind="rcv.date" data-norender value="${esc(r.date)}"></label>
+          <label class="fld full" for="rcv-memo"><span>메모</span><input class="inp" id="rcv-memo" data-bind="rcv.memo" data-norender value="${esc(r.memo)}" placeholder="예: 거래명세서 번호, 특이사항"></label>
+        </div>
+        <div class="rcv-find"><label class="sr" for="rcvQ">입고할 품목 찾기</label><div class="search" style="max-width:none"><input class="inp" id="rcvQ" data-bind="rcvQ" value="${esc(S.ui.rcvQ)}" placeholder="입고할 품목을 이름·보험코드로 찾아 추가" autocomplete="off"></div>
+          ${qq ? `<div class="rcv-res">${res.length ? res.map(p => `<button class="rcv-opt" data-act="rcvAdd" data-id="${esc(p.id)}"><span class="t">${esc(p.name)}${p.active === false ? ' <span class="tag">판매중지</span>' : ''}</span><span class="s">${meta(esc(p.spec || ''), p.code ? esc(p.code) : '', p.track ? `재고 ${won(p.stock)}` : '', costOf(p) ? `매입가 ${won(costOf(p))}` : '')}</span></button>`).join('') : `<div class="empty-s" style="padding:14px">찾는 품목이 없어요. 처음 들어오는 품목이면 상품·재고에서 상품을 먼저 추가해 주세요.</div>`}</div>` : ''}
+        </div>
+        ${r.lines.length ? `<div class="tbl-wrap" data-keep="rcvtbl"><table><thead><tr><th>품목</th><th>수량</th><th>로트번호</th><th>유효기간</th><th class="num">매입가</th><th class="num">금액</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-s">위에서 품목을 찾아 추가하거나, 거래명세서 엑셀을 불러오세요.</div>`}
+        <div class="row" style="justify-content:space-between;align-items:center"><span class="muted">${meta(`${info.n}품목`, `합계 ${won(info.total)}원`)}</span>
+          <span class="row">${r.lines.length ? `<button class="btn ghost" data-act="rcvClear">비우기</button>` : ''}<button class="btn primary" data-act="rcvSave"${info.n && !S.busy ? '' : ' disabled'}>${S.busy ? '등록하는 중…' : `입고 등록 (${info.n}품목)`}</button></span></div>
+        <p class="hint">등록하면 재고가 로트·유효기간별로 늘고, 매입가를 넣은 품목은 그 값이 최근 매입가로 저장돼요. 품절로 표시된 품목은 자동으로 풀리고 재고 요청도 입고 완료로 바뀌어요.</p>
+      </div>
+    </section>
+    <section class="panel"><div class="panel-h"><h2>최근 입고</h2><span class="muted">${S.receipts.size}건</span></div>
+      ${recent.length ? `<div class="tbl-wrap" style="border:0;border-radius:0"><table><thead><tr><th>입고번호</th><th>입고일</th><th>매입처</th><th class="num">품목</th><th class="num">금액</th><th>상태</th></tr></thead><tbody>${recent.map(x => `<tr class="click" data-act="openReceipt" data-id="${esc(x.id)}" role="button" tabindex="0"><td class="mono nowrap">${esc(x.no)}</td><td class="tabnum nowrap">${fmtD(x.receipt_date)}</td><td>${esc(x.supplier_name || '-')}</td><td class="num">${(x.lines || []).length}</td><td class="num">${won(x.total)}</td><td>${x.status === '취소' ? '<span class="tag bad">취소</span>' : '<span class="tag ok">입고</span>'}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty"><b>아직 입고 기록이 없어요</b>입고를 등록하면 여기에 전표가 쌓여요.</div>`}
+    </section>`;
+}
+async function loadHist(key) {
+  const [from, to] = key.split('|');
+  try { const rows = await q(sb.from('stock_moves').select('*').gte('date', from).lte('date', to).order('date', { ascending: false }).order('created_at', { ascending: false }).limit(5000)); if (S.hist?.key === key) S.hist = { key, rows }; }
+  catch (e) { if (S.hist?.key === key) S.hist = { key, rows: [], error: errMsg(e) }; }
+  schedule();
+}
+function histRows() { const h = S.hist; if (!h || !h.rows) return []; const qq = S.ui.hq.trim().toLowerCase(); return h.rows.filter(m => (!S.ui.hType || m.type === S.ui.hType) && (!qq || [m.name, m.lot, m.ref, m.memo].join(' ').toLowerCase().includes(qq))); }
+function histTab() {
+  const key = `${S.ui.hFrom}|${S.ui.hTo}`;
+  if (!S.hist || S.hist.key !== key) { S.hist = { key, busy: true, rows: null }; setTimeout(() => loadHist(key), 0); }
+  const h = S.hist; const list = histRows();
+  let inQ = 0, inAmt = 0, outQ = 0, lossQ = 0;
+  for (const m of list) { const qv = num(m.qty); if (m.type === '입고' || m.type === '입고 취소') { inQ += qv; inAmt += qv * num(m.cost); } else if (m.type === '출고') outQ -= qv; else if (m.type === '폐기') lossQ -= qv; }
+  return `
+    <div class="row hist-f">
+      <label class="fld" for="hFrom"><span>시작일</span><input class="inp" type="date" id="hFrom" data-bind="hFrom" value="${esc(S.ui.hFrom)}"></label>
+      <label class="fld" for="hTo"><span>종료일</span><input class="inp" type="date" id="hTo" data-bind="hTo" value="${esc(S.ui.hTo)}"></label>
+      <label class="fld" for="hType"><span>구분</span><select class="inp" id="hType" data-bind="hType"><option value="">전체</option>${MOVE_TYPES.map(t => opt(t, S.ui.hType)).join('')}</select></label>
+      <label class="fld grow" for="hq"><span>검색</span><input class="inp" id="hq" data-bind="hq" value="${esc(S.ui.hq)}" placeholder="품목·로트·주문번호·매입처"></label>
+    </div>
+    <p class="muted">${meta(`${list.length}건`, `입고 ${won(inQ)}개 · ${won(inAmt)}원`, `출고 ${won(outQ)}개`, lossQ ? `폐기 ${won(lossQ)}개` : '')}</p>
+    ${h.busy ? `<div class="panel"><div class="loading"><i></i>불러오는 중</div></div>` : h.error ? `<div class="note bad"><b>불러오지 못했어요</b>${esc(h.error)}</div>` : list.length ? `<div class="tbl-wrap" data-keep="htbl"><table><thead><tr><th>일자</th><th>구분</th><th>품목</th><th>로트 · 유효기간</th><th class="num">수량</th><th class="num">매입가</th><th class="num">입고 금액</th><th>참고</th></tr></thead><tbody>${list.slice(0, 1500).map(m => { const qv = num(m.qty); const isIn = m.type === '입고' || m.type === '입고 취소'; return `<tr><td class="tabnum nowrap">${fmtD(m.date)}</td><td><span class="tag ${mvTone(m.type)}">${esc(m.type)}</span></td><td><div class="t">${esc(m.name)}</div></td><td class="s nowrap">${esc(m.lot || '-')}${m.exp ? ' · ' + fmtD(m.exp) : ''}</td><td class="num nowrap ${qv < 0 ? 'neg' : 'pos'}">${qv > 0 ? '+' : ''}${won(qv)}</td><td class="num">${isIn && num(m.cost) ? won(m.cost) : '<span class="muted">-</span>'}</td><td class="num">${isIn && num(m.cost) ? won(qv * num(m.cost)) : '<span class="muted">-</span>'}</td><td class="s"><div class="cw">${esc([m.ref, m.memo].filter(Boolean).join(' · '))}</div></td></tr>`; }).join('')}</tbody></table></div>${list.length > 1500 ? '<p class="hint">화면에는 1,500건까지 보여요. 전체는 엑셀로 내려받으세요.</p>' : ''}` : `<div class="panel"><div class="empty"><b>이 기간에 입출고가 없어요</b>기간이나 구분을 바꿔 보세요.</div></div>`}`;
+}
+function supTab() {
+  const qq = S.ui.supQ.trim().toLowerCase(); const m = thisMonth();
+  const stats = new Map(); for (const r of S.receipts.values()) { if (r.status === '취소' || !r.supplier_id) continue; const s = stats.get(r.supplier_id) || { n: 0, mon: 0, last: '' }; s.n++; if ((r.receipt_date || '').startsWith(m)) s.mon += num(r.total); if (ko(r.receipt_date, s.last) > 0) s.last = r.receipt_date; stats.set(r.supplier_id, s); }
+  const items = new Map(); for (const c of S.costs.values()) if (c.supplier_id) items.set(c.supplier_id, (items.get(c.supplier_id) || 0) + 1);
+  let list = [...S.suppliers.values()]; if (qq) list = list.filter(s => [s.name, s.biz_no, s.manager, s.tel, s.mobile, s.memo].join(' ').toLowerCase().includes(qq));
+  list.sort((a, b) => (b.active !== false) - (a.active !== false) || ko(a.name, b.name));
+  return `<div class="row"><div class="search"><label class="sr" for="supQ">매입처 검색</label><input class="inp" id="supQ" data-bind="supQ" value="${esc(S.ui.supQ)}" placeholder="상호·사업자번호·담당자 검색"></div></div>
+    ${list.length ? `<div class="tbl-wrap" data-keep="suptbl"><table><thead><tr><th>매입처</th><th>사업자번호</th><th>담당 · 연락처</th><th class="num">취급 품목</th><th class="num">이번 달 입고액</th><th class="num">입고 건수</th><th>최근 입고</th></tr></thead><tbody>${list.map(s => { const st = stats.get(s.id) || { n: 0, mon: 0, last: '' }; return `<tr class="click" data-act="editSupplier" data-id="${esc(s.id)}" role="button" tabindex="0"${s.active === false ? ' style="opacity:.55"' : ''}><td><div class="t">${esc(s.name)}${s.active === false ? ' <span class="tag">거래 안 함</span>' : ''}</div>${s.memo ? `<div class="s">${esc(s.memo)}</div>` : ''}</td><td class="mono nowrap">${esc(bizFmt(s.biz_no) || '-')}</td><td><div>${esc(s.manager || '-')}</div><div class="s">${esc(s.tel || s.mobile || '')}</div></td><td class="num">${items.get(s.id) || 0}</td><td class="num">${won(st.mon)}</td><td class="num">${st.n}</td><td class="tabnum nowrap">${fmtD(st.last) || '<span class="muted">-</span>'}</td></tr>`; }).join('')}</tbody></table></div>` : `<div class="panel"><div class="empty"><b>${qq ? '검색 결과가 없어요' : '등록된 매입처가 없어요'}</b>${qq ? '다른 검색어로 찾아 보세요.' : '제약사·도매상 등 물건을 사 오는 곳을 등록하면, 입고할 때 고르고 매입처별 입고액을 볼 수 있어요.'}${qq ? '' : `<div style="margin-top:12px"><button class="btn primary" data-act="newSupplier">매입처 추가</button></div>`}</div></div>`}`;
 }
 
 function accountsView() {
@@ -878,10 +1014,12 @@ const MODALS = {
       ${mf('규격', 'spec', { ph: '예: 68.1mg/1정' })}${mf('제조사', 'maker')}
       ${mf('보험코드 (EDI)', 'code', { ph: '9자리', mono: true })}${mf('표준코드 (바코드)', 'std', { ph: '13자리', mono: true })}
       ${mf('판매단위', 'unit', { ph: '정·캡슐·병·박스·개' })}${mf('주문 배수', 'step', { num: true, ph: '1' })}
-      ${mf('기준가 (보험 상한)', 'base_price', { num: true })}${mf('판매가', 'price', { num: true, req: true })}
-      ${mf('안전재고', 'safety', { num: true, ph: '이 수량 밑이면 알림' })}
+      ${mf('기준가 (보험 상한)', 'base_price', { num: true })}${mf('판매가', 'price', { num: true, req: true, live: true })}
+      ${mf('안전재고', 'safety', { num: true, ph: '이 수량 밑이면 알림' })}${mf('매입가 (최근)', 'cost', { num: true, live: true, ph: '관리자만 보여요' })}
+      ${msel('주 매입처', 'supplier_id', [['', '선택 안 함'], ...[...S.suppliers.values()].filter(s => s.active !== false || s.id === M.draft.supplier_id).sort((a, b) => ko(a.name, b.name)).map(s => [s.id, s.name])])}
       <div class="fld" style="align-content:end;gap:8px">${mchk('재고 관리', 'track')}${mchk('판매 중 (끄면 거래처 화면에서 숨겨요)', 'active')}${mchk('일시 품절 (거래처가 주문할 수 없고 재고 요청을 받아요)', 'soldout')}</div>
     </div><datalist id="grp-list">${[...new Set(products().map(p => p.grp).filter(Boolean))].sort(ko).map(g => `<option value="${esc(g)}"></option>`).join('')}</datalist>
+    ${(() => { const m = margin(M.draft.price, M.draft.cost); return m ? `<p class="hint">마진 ${won(m.amt)}원 (판매가의 ${m.pct}%) · 매입가는 관리자 화면에만 보여요</p>` : ''; })()}
     ${rx ? `<p class="hint">${esc(rx.month)} 원외처방: ${won(rx.count)}회 · ${won(rx.qty)}${esc(ex.unit || '')} (급여 ${won(rx.ins_qty)} / 비급여 ${won(rx.non_qty)})</p>` : ''}`;
     return frame(ex ? '상품 수정' : '상품 추가', ex ? esc(ex.name) : '의약품·의료소모품을 등록해요', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="saveProduct"${busyAttr()}>저장</button>`);
   },
@@ -933,6 +1071,33 @@ const MODALS = {
     const b = d.account_id ? balanceOf(d.account_id).bal : null;
     const body = `<div class="fgrid">${msel('거래처', 'account_id', [['', '거래처 선택'], ...accs.map(a => [a.id, a.name])], { live: true })}${mf('입금일', 'date', { type: 'date' })}${mf('금액 (원)', 'amount', { num: true, req: true, af: true })}${msel('방법', 'method', PAY_METHODS)}${mf('메모', 'memo', { full: true, ph: '예: 9월분' })}</div>${b != null ? `<p class="hint">현재 미수 잔액 ${won(b)}원</p>` : ''}`;
     return frame('입금 등록', '', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="savePayment"${busyAttr()}>등록</button>`);
+  },
+  supplier() {
+    const ex = M.data.id ? S.suppliers.get(M.data.id) : null;
+    const body = `<div class="fgrid">
+      ${mf('상호', 'name', { req: true, full: true, af: true })}
+      ${mf('사업자등록번호', 'biz_no', { ph: '000-00-00000', mono: true })}${mf('대표자', 'ceo')}
+      ${mf('담당자', 'manager')}${mf('전화', 'tel')}
+      ${mf('휴대폰', 'mobile')}${mf('이메일', 'email')}
+      ${mf('주소', 'addr', { full: true })}${mf('메모', 'memo', { full: true, ph: '결제 조건, 주문 방법 등' })}
+      <div class="fld full">${mchk('거래 중 (끄면 입고할 때 목록에서 숨겨요)', 'active')}</div>
+    </div>`;
+    return frame(ex ? '매입처 수정' : '매입처 추가', ex ? esc(ex.name) : '물건을 사 오는 제약사·도매상을 등록해요', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="saveSupplier"${busyAttr()}>저장</button>`);
+  },
+  receipt() {
+    const r = S.receipts.get(M.data.id); if (!r) return frame('입고 전표', '', '<p class="muted">전표를 찾을 수 없어요.</p>');
+    const body = `<div class="kv"><div><span>입고번호</span><b class="mono">${esc(r.no)}</b></div><div><span>입고일</span><b>${fmtD(r.receipt_date)}</b></div><div><span>매입처</span><b>${esc(r.supplier_name || '-')}</b></div><div><span>상태</span><b>${r.status === '취소' ? `취소 ${fmtDT(r.canceled_at)}` : '입고'}</b></div></div>
+      <div class="tbl-wrap"><table><thead><tr><th>품목</th><th class="num">수량</th><th>로트 · 유효기간</th><th class="num">매입가</th><th class="num">금액</th></tr></thead><tbody>${(r.lines || []).map(l => `<tr><td><div class="t">${esc(l.name)}</div><div class="s">${esc(l.spec || '')}</div></td><td class="num nowrap">${won(l.qty)}${esc(l.unit || '')}</td><td class="s nowrap">${esc(l.lot || '-')}${l.exp ? ' · ' + fmtD(l.exp) : ''}</td><td class="num">${num(l.cost) ? won(l.cost) : '-'}</td><td class="num">${num(l.cost) ? won(num(l.qty) * num(l.cost)) : '-'}</td></tr>`).join('')}<tr><td colspan="4" class="num"><b>합계</b></td><td class="num"><b>${won(r.total)}</b></td></tr></tbody></table></div>
+      ${r.memo ? `<p class="hint">메모: ${esc(r.memo)}</p>` : ''}
+      ${r.status !== '취소' ? `<p class="hint">잘못 넣은 입고는 취소할 수 있어요. 이 전표 수량만큼 재고에서 빠지고, 이미 출고돼 재고가 모자라면 취소되지 않아요.</p>` : ''}`;
+    return frame('입고 전표', meta(esc(r.no), esc(r.supplier_name || '')), body, `${r.status !== '취소' ? armBtn('rcvCancel', '입고 취소', '한 번 더 누르면 취소') : ''}<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button>`);
+  },
+  rcvx() {
+    const r = M.data;
+    const body = `<div class="note info">${esc(r.file)} · 넣을 줄 ${r.ok.length}개${r.miss.length ? ` · 못 찾은 품목 ${r.miss.length}개` : ''}</div>
+      ${r.ok.length ? `<div class="tbl-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th>품목</th><th class="num">수량</th><th>로트 · 유효기간</th><th class="num">매입가</th></tr></thead><tbody>${r.ok.map(a => `<tr><td><div class="t">${esc(a.p.name)}${a.how === 'part' ? ' <span class="tag warn">이름 일부로 찾음</span>' : ''}</div><div class="s">${esc(a.p.spec || '')}${a.src && a.how !== 'code' && normN(a.src) !== normN(a.p.name) ? ' · 엑셀: ' + esc(a.src) : ''}</div></td><td class="num nowrap">${won(a.qty)}${esc(a.p.unit || '')}</td><td class="s nowrap">${esc(a.lot || '-')}${a.exp ? ' · ' + fmtD(a.exp) : ''}</td><td class="num">${a.cost ? won(a.cost) : '-'}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      ${r.miss.length ? `<div class="stack" style="gap:6px"><div class="sec-t">상품 목록에서 못 찾은 품목</div><ul class="list panel">${r.miss.map(m => `<li class="li"><div class="li-main" style="white-space:normal"><div class="li-t" style="white-space:normal">${esc(m.name)}${m.spec ? ` <span class="muted">${esc(m.spec)}</span>` : ''} · ${won(m.qty)}</div>${m.cands.length ? `<div class="li-s" style="white-space:normal">비슷한 품목: ${m.cands.map(esc).join(', ')}</div>` : ''}</div></li>`).join('')}</ul><p class="hint">처음 들어오는 품목이면 상품·재고에서 상품을 먼저 추가한 뒤 다시 불러오세요. 이름만 다르면 엑셀의 제품명을 목록과 같게 고치면 돼요.</p></div>` : ''}`;
+    return frame('입고 엑셀 확인', '확인한 줄을 입고 전표에 넣어요. 재고 반영은 전표에서 「입고 등록」을 눌러야 돼요.', body, `<span class="spacer"></span><button class="btn" data-act="closeModal">닫기</button><button class="btn primary" data-act="applyRcvX"${r.ok.length ? '' : ' disabled'}>${r.ok.length}줄 전표에 넣기</button>`);
   },
   orderx() {
     const r = M.data; const inCart = Object.keys(cartOf(custCtx().account_id).lines).length;
@@ -1012,6 +1177,12 @@ async function run(fnc, okMsg, modal = true) {
   finally { if (modal) { M.busy = false; if (M.kind) renderModal(); } else { S.busy = false; schedule(); } }
 }
 function draftLines(o) { return (o.lines || []).map((l, i) => { const d = M.draft.lines[i] || {}; return { qty: Math.max(0, Math.floor(num(d.qty))), price: Math.max(0, num(d.price)), lot: String(d.lot || '').trim(), exp: d.exp || '' }; }); }
+async function saveCostRow(pid, d) {
+  const prev = S.costs.get(pid); const costS = String(d.cost ?? '').trim(); const sup = d.supplier_id || null; const cost = Math.max(0, num(costS));
+  if (!prev && !costS && !sup) return;
+  if (prev && num(prev.cost) === cost && (prev.supplier_id || null) === sup) return;
+  await q(sb.from('product_costs').upsert({ product_id: pid, cost, supplier_id: sup, updated_at: new Date().toISOString() }));
+}
 function openWindow() { try { return window.open('about:blank', '_blank'); } catch { return null; } }
 
 const A = {
@@ -1075,6 +1246,50 @@ const A = {
   toggleOpen(d) { S.ui.open[d.id] = !S.ui.open[d.id]; render(); },
   reloadPage() { location.reload(); },
   async logout() { try { await sb.auth.signOut(); } catch {} location.reload(); },
+  stab(d) { S.ui.stab = d.s; LS.set('stab', d.s); render(); window.scrollTo(0, 0); },
+  exStock() { exportStock(); }, exHist() { exportHist(); },
+  rcvTemplate() { exportRcvTemplate(); },
+  rcvXlsx() { if (!window.XLSX) return toast('엑셀 도구를 불러오지 못했어요. 새로 고쳐 주세요', 'bad'); const el = document.getElementById('rcv-xlsx-in'); el.value = ''; el.click(); },
+  rcvAdd(d) {
+    const p = S.products.get(d.id); if (!p) return; const c = S.costs.get(p.id);
+    S.ui.rcv.lines.push({ pid: p.id, qty: '', lot: '', exp: '', cost: c && num(c.cost) ? String(num(c.cost)) : '' });
+    if (!S.ui.rcv.sup && c?.supplier_id && S.suppliers.get(c.supplier_id)?.active !== false) S.ui.rcv.sup = c.supplier_id;
+    S.ui.rcvQ = ''; saveRcv();
+    if (d.go) { S.view = 'stock'; LS.set('view', 'stock'); S.ui.stab = '입고'; LS.set('stab', '입고'); }
+    render(); const i = S.ui.rcv.lines.length - 1; setTimeout(() => document.getElementById('rq-' + i)?.focus(), 0);
+  },
+  rcvDel(d) { S.ui.rcv.lines.splice(+d.i, 1); saveRcv(); render(); },
+  rcvClear() { S.ui.rcv = newRcv(S.ui.rcv.sup); saveRcv(); render(); },
+  async rcvSave() {
+    const r = S.ui.rcv; const lines = [];
+    for (const l of r.lines) { const qv = Math.floor(num(l.qty)); if (!(qv > 0) || !S.products.get(l.pid)) continue; lines.push({ product_id: l.pid, qty: qv, lot: String(l.lot || '').trim(), exp: l.exp || '', cost: Math.max(0, num(l.cost)) }); }
+    if (!lines.length) return toast('수량을 넣은 줄이 없어요', 'bad');
+    const skip = r.lines.length - lines.length;
+    const res = await run(() => rpc('receive_stock', { p_supplier_id: r.sup || null, p_date: r.date || today(), p_memo: String(r.memo || '').trim(), p_lines: lines }), x => `입고 ${x.no} 등록했어요 · ${x.count}품목${skip ? ` (수량 없는 ${skip}줄 제외)` : ''}`, false);
+    if (res) { S.ui.rcv = newRcv(r.sup); saveRcv(); S.hist = null; await reload('products', 'moves', 'costs', 'receipts', 'reqs'); }
+  },
+  openReceipt(d) { openModal('receipt', { id: d.id }, {}, { size: 'wide' }); },
+  async cancelReceipt() {
+    const r = S.receipts.get(M.data.id); if (!r) return;
+    if (await run(() => rpc('cancel_receipt', { p_id: r.id }), `입고 ${r.no}을 취소했어요`)) { S.hist = null; await reload('products', 'moves', 'receipts'); renderModal(); }
+  },
+  applyRcvX() {
+    const r = M.data; if (!r || !r.ok.length) return;
+    for (const a of r.ok) S.ui.rcv.lines.push({ pid: a.p.id, qty: String(a.qty), lot: a.lot || '', exp: a.exp || '', cost: a.cost ? String(a.cost) : (costOf(a.p) ? String(costOf(a.p)) : '') });
+    saveRcv(); closeModal(); S.view = 'stock'; S.ui.stab = '입고'; LS.set('stab', '입고'); render();
+    toast(`${r.ok.length}줄을 입고 전표에 넣었어요. 확인한 뒤 「입고 등록」을 눌러 주세요`, 'ok');
+  },
+  newSupplier() { openModal('supplier', {}, { name: '', biz_no: '', ceo: '', manager: '', tel: '', mobile: '', email: '', addr: '', memo: '', active: true }); },
+  editSupplier(d) { const s = S.suppliers.get(d.id); if (!s) return; openModal('supplier', { id: s.id }, { name: s.name || '', biz_no: bizFmt(s.biz_no) || '', ceo: s.ceo || '', manager: s.manager || '', tel: s.tel || '', mobile: s.mobile || '', email: s.email || '', addr: s.addr || '', memo: s.memo || '', active: s.active !== false }); },
+  async saveSupplier() {
+    const d = M.draft; const name = String(d.name || '').trim(); if (!name) return toast('상호를 입력하세요', 'bad');
+    if (String(d.biz_no || '').trim() && digits(d.biz_no).length !== 10) return toast('사업자등록번호는 숫자 10자리예요', 'bad');
+    const t = k => String(d[k] || '').trim();
+    const body = { name, biz_no: digits(d.biz_no), ceo: t('ceo'), manager: t('manager'), tel: t('tel'), mobile: t('mobile'), email: t('email'), addr: t('addr'), memo: t('memo'), active: !!d.active, updated_at: new Date().toISOString() };
+    const id = M.data.id;
+    const r = await run(() => id ? q(sb.from('suppliers').update(body).eq('id', id).select().single()) : q(sb.from('suppliers').insert(body).select().single()), '매입처를 저장했어요');
+    if (r) { closeModal(); await reload('suppliers'); if (!id && r.id && S.view === 'stock' && S.ui.stab === '입고' && !S.ui.rcv.sup) { S.ui.rcv.sup = r.id; saveRcv(); render(); } }
+  },
   orderTemplate() { exportOrderTemplate(); },
   orderXlsx() { if (!window.XLSX) return toast('엑셀 도구를 불러오지 못했어요. 새로 고쳐 주세요', 'bad'); const el = document.getElementById('order-xlsx-in'); el.value = ''; el.click(); },
   applyOrderXlsx() {
@@ -1112,6 +1327,7 @@ const A = {
     M.armed = ''; const k = d.a;
     if (k === 'cancel') return A.orderStatus('취소', '주문을 취소했어요');
     if (k === 'voidInv') return A.voidInvoice();
+    if (k === 'rcvCancel') return A.cancelReceipt();
     if (k.startsWith('rmLogin:')) return A.removeLogin(k.slice(8));
   },
   async orderStatus(status, msg, withLines) {
@@ -1130,8 +1346,8 @@ const A = {
     const r = await run(() => rpc('ship_order', { p_order_id: o.id, p_lines: lines, p_admin_memo: String(M.draft.admin_memo || '').trim(), p_force: !!M.draft.force }), r => `출고 처리했어요 · ${won(r.total)}원`);
     if (r) await reload('orders', 'shipments', 'products', 'moves');
   },
-  newProduct() { openModal('product', {}, { kind: '의약품', grp: '', name: '', spec: '', maker: '', code: '', std: '', unit: '개', step: 1, base_price: '', price: '', safety: '', track: false, active: true, soldout: false }); },
-  editProduct(d) { const p = S.products.get(d.id); if (!p) return; openModal('product', { id: p.id }, { kind: p.kind || '의약품', grp: p.grp || '', name: p.name || '', spec: p.spec || '', maker: p.maker || '', code: p.code || '', std: p.std || '', unit: p.unit || '', step: p.step || 1, base_price: p.base_price ?? '', price: p.price ?? '', safety: p.safety || '', track: !!p.track, active: p.active !== false, soldout: !!p.soldout }); },
+  newProduct() { openModal('product', {}, { kind: '의약품', grp: '', name: '', spec: '', maker: '', code: '', std: '', unit: '개', step: 1, base_price: '', price: '', safety: '', track: false, active: true, soldout: false, cost: '', supplier_id: '' }); },
+  editProduct(d) { const p = S.products.get(d.id); if (!p) return; openModal('product', { id: p.id }, { kind: p.kind || '의약품', grp: p.grp || '', name: p.name || '', spec: p.spec || '', maker: p.maker || '', code: p.code || '', std: p.std || '', unit: p.unit || '', step: p.step || 1, base_price: p.base_price ?? '', price: p.price ?? '', safety: p.safety || '', track: !!p.track, active: p.active !== false, soldout: !!p.soldout, cost: S.costs.get(p.id) && num(S.costs.get(p.id).cost) ? String(num(S.costs.get(p.id).cost)) : '', supplier_id: S.costs.get(p.id)?.supplier_id || '' }); },
   async saveProduct() {
     const d = M.draft; const ex = M.data.id ? S.products.get(M.data.id) : null;
     if (!String(d.name).trim()) return toast('제품명을 입력하세요', 'bad');
@@ -1140,8 +1356,8 @@ const A = {
     const id = ex ? ex.id : (code ? 'p' + safeId(code) : 'p' + rid());
     if (!ex && S.products.has(id)) return toast('같은 보험코드 상품이 이미 있어요', 'bad');
     const body = { kind: d.kind, grp: String(d.grp).trim(), code, std: String(d.std).trim(), name: String(d.name).trim(), spec: String(d.spec).trim(), maker: String(d.maker).trim(), unit: String(d.unit).trim() || '개', step: Math.max(1, Math.floor(num(d.step)) || 1), base_price: String(d.base_price).trim() === '' ? num(d.price) : num(d.base_price), price: num(d.price), safety: Math.max(0, num(d.safety)), track: !!d.track, active: !!d.active, soldout: !!d.soldout, updated_at: new Date().toISOString() };
-    const ok = await run(() => ex ? q(sb.from('products').update(body).eq('id', id)) : q(sb.from('products').insert({ id, ...body })), '상품을 저장했어요');
-    if (ok) { closeModal(); reload('products', 'reqs'); }
+    const ok = await run(async () => { await (ex ? q(sb.from('products').update(body).eq('id', id)) : q(sb.from('products').insert({ id, ...body }))); await saveCostRow(id, d); }, '상품을 저장했어요');
+    if (ok) { closeModal(); reload('products', 'reqs', 'costs'); }
   },
   editStock(d) { const p = S.products.get(d.id); if (!p) return; openModal('stock', { id: p.id }, { type: '입고', qty: '', lot: '', exp: '', date: today(), memo: '' }); },
   async saveStock() {
@@ -1432,6 +1648,92 @@ document.getElementById('order-xlsx-in').addEventListener('change', e => {
   };
   rd.readAsArrayBuffer(f);
 });
+/* 재고 관리 엑셀: 입고 양식 · 거래명세서 불러오기 · 재고 현황 · 입출고 내역 */
+function matcher(list) {
+  const byCode = new Map(), byName = new Map();
+  for (const p of list) { if (p.code) byCode.set(normCode(p.code), p); const k = normN(p.name); if (!byName.has(k)) byName.set(k, []); byName.get(k).push(p); }
+  return (name, code, spec) => {
+    const pc = code && byCode.get(code); if (pc) return { p: pc, how: 'code' };
+    if (!name) return { p: null, cands: [] };
+    const k = normN(name); let cands = byName.get(k) || [];
+    if (cands.length > 1 && spec) { const f = cands.filter(x => normN(x.spec) === normN(spec)); if (f.length) cands = f; }
+    if (cands.length === 1) return { p: cands[0], how: 'name' };
+    if (!cands.length && k.length >= 3) { const part = list.filter(x => { const n = normN(x.name); return n.includes(k) || k.includes(n); }); if (part.length === 1) return { p: part[0], how: 'part' }; cands = part; }
+    return { p: null, cands };
+  };
+}
+function xlDate(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number') { if (v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 86400000)); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; } v = String(Math.floor(v)); }
+  const s = String(v).trim(); let m = s.match(/^(\d{4})(\d{2})(\d{2})$/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{4})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})/); if (m) return `${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  m = s.match(/^(\d{4})\s*[.\-\/년]\s*(\d{1,2})\s*월?$/); if (m) return monthEnd(`${m[1]}-${pad(+m[2])}`);
+  return '';
+}
+function parseRcvRows(rows) {
+  const cl = v => String(v ?? '').replace(/\s/g, '').toUpperCase();
+  const NAME = ['제품명', '품목명', '약품명', '상품명', '약제명', '품명', '제품', '품목', '적요'], CODE = ['보험코드', '코드', 'EDI', 'EDI코드', '보험코드(EDI)', '제품코드', '약품코드'], QTY = ['수량', '입고수량', '매입수량', '출고수량', '주문수량'];
+  const hi = rows.findIndex(r => Array.isArray(r) && r.some(c => QTY.includes(cl(c))) && r.some(c => NAME.includes(cl(c)) || CODE.includes(cl(c))));
+  if (hi < 0) return { error: '「제품명」(또는 보험코드)과 「수량」 칸이 있는 제목 줄을 찾지 못했어요. 「입고 양식 받기」로 받은 양식을 쓰거나, 거래명세서 엑셀의 제목 줄을 확인해 주세요.' };
+  const H = rows[hi].map(cl); const col = list => H.findIndex(h => list.includes(h));
+  const c = { name: col(NAME), code: col(CODE), spec: col(['규격']), qty: col(QTY), cost: col(['매입가', '매입단가', '단가', '공급단가', '입고단가']), lot: col(['로트', '로트번호', 'LOT', 'LOTNO', '제조번호', '로트(제조번호)']), exp: col(['유효기간', '사용기한', '유효일자', '유효기한']) };
+  const find = matcher(products()); const ok = [], miss = [];
+  for (const r of rows.slice(hi + 1)) {
+    if (!Array.isArray(r)) continue;
+    const name = c.name >= 0 ? String(r[c.name] ?? '').trim() : ''; const code = c.code >= 0 ? normCode(r[c.code]) : ''; const spec = c.spec >= 0 ? String(r[c.spec] ?? '').trim() : '';
+    if (/합계|누계|소계|전일\s*잔액|카드결제|입금/.test(name)) continue;
+    const qty = Math.floor(num(String(r[c.qty] ?? '').replace(/[^\d.]/g, '')));
+    if (!(qty > 0) || (!name && !code)) continue;
+    const cost = c.cost >= 0 ? Math.max(0, num(r[c.cost])) : 0;
+    const lot = c.lot >= 0 ? String(r[c.lot] ?? '').trim().slice(0, 60) : '';
+    let exp = c.exp >= 0 ? xlDate(r[c.exp]) : ''; if (exp && exp < '2005-01-01') exp = '';
+    const m = find(name, code, spec);
+    if (!m.p) { miss.push({ name: name || code, spec, qty, cands: (m.cands || []).slice(0, 4).map(x => x.name) }); continue; }
+    ok.push({ p: m.p, how: m.how, src: name, qty, cost, lot, exp });
+  }
+  if (!ok.length && !miss.length) return { error: '수량이 적힌 줄이 없어요. 「수량」 칸을 확인해 주세요.' };
+  return { ok, miss };
+}
+document.getElementById('rcv-xlsx-in').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const wb = XLSX.read(new Uint8Array(rd.result), { type: 'array' }); let res = null;
+      for (const n of wb.SheetNames) { const r = parseRcvRows(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null })); if (!r.error) { res = r; break; } res = res || r; }
+      if (!res || res.error) return toast((res && res.error) || '엑셀 파일을 읽지 못했어요', 'bad');
+      openModal('rcvx', { ...res, file: f.name }, {}, { size: 'wide' });
+    } catch (err) { console.warn(err); toast('엑셀 파일을 읽지 못했어요', 'bad'); }
+  };
+  rd.readAsArrayBuffer(f);
+});
+function exportRcvTemplate() {
+  const list = products().sort((a, b) => ko(a.kind || '의약품', b.kind || '의약품') || ko(a.name, b.name));
+  const rows = [['보험코드', '제품명', '규격', '단위', '현재고', '수량', '매입가', '로트번호', '유효기간'], ...list.map(p => [p.code || '', p.name, p.spec || '', p.unit || '개', p.track ? num(p.stock) : '', '', costOf(p) || '', '', ''])];
+  const guide = [['원윤메디팜 입고 양식 작성 방법'], [''],
+    ['1. 들어온 품목의 「수량」을 적어 주세요. 수량이 빈 줄은 입고하지 않아요.'],
+    ['2. 「매입가」는 1단위(정·캡슐·개 등) 가격이에요. 적으면 최근 매입가로 저장돼 재고 금액과 마진 계산에 쓰여요.'],
+    ['3. 「로트번호」와 「유효기간」(예: 2027-03-31)을 적으면 로트별로 관리하고 유효기간 임박을 알려 줘요.'],
+    ['4. 같은 품목이라도 로트가 여러 개면 줄을 복사해 로트마다 한 줄씩 적어 주세요.'],
+    ['5. 재고 관리 → 입고 → 「거래명세서 엑셀 불러오기」로 올리면 입고 전표에 들어가요. 확인한 뒤 「입고 등록」을 눌러야 재고에 반영돼요.'], [''],
+    ['처음 사이트를 쓸 때 지금 창고에 있는 재고를 이 양식으로 한 번에 넣으면 돼요. 매입처 거래명세서 엑셀도 제품명·수량 칸이 있으면 그대로 불러올 수 있어요.']];
+  saveXlsx(`원윤메디팜_입고양식_${today().replace(/-/g, '')}.xlsx`, [{ name: '입고', rows, cols: [12, 46, 22, 6, 8, 8, 9, 14, 12] }, { name: '작성 방법', rows: guide, cols: [110] }]);
+}
+function exportStock() {
+  const tracked = products().filter(p => p.track).sort((a, b) => ko(a.name, b.name));
+  if (!tracked.length) return toast('재고를 관리하는 품목이 아직 없어요', 'bad');
+  const r1 = [['구분', '보험코드', '제품명', '규격', '단위', '현재고', '안전재고', '가까운 유효기간', '매입가', '재고 금액', '판매가', '마진율(%)', '매입처']];
+  for (const p of tracked) { const lot = liveLots(p)[0]; const c = costOf(p); const m = margin(p.price, c); r1.push([p.kind || '의약품', p.code || '', p.name, p.spec || '', p.unit || '', num(p.stock), num(p.safety) || '', lot?.exp || '', c || '', c ? c * Math.max(0, num(p.stock)) : '', num(p.price), m ? m.pct : '', supName(S.costs.get(p.id)?.supplier_id)]); }
+  const r2 = [['제품명', '규격', '로트번호', '유효기간', '남은 일수', '수량']];
+  for (const p of tracked) for (const l of liveLots(p)) r2.push([p.name, p.spec || '', l.lot || '', l.exp || '', l.exp ? daysUntil(l.exp) : '', num(l.qty)]);
+  saveXlsx(`재고현황_${today().replace(/-/g, '')}.xlsx`, [{ name: '품목별', rows: r1, cols: [10, 12, 40, 20, 6, 9, 9, 13, 9, 12, 9, 9, 16] }, { name: '로트별', rows: r2, cols: [40, 20, 14, 12, 9, 9] }]);
+}
+function exportHist() {
+  const list = histRows(); if (!list.length) return toast('내려받을 내역이 없어요', 'bad');
+  const rows = [['일자', '구분', '제품명', '로트번호', '유효기간', '수량', '매입가', '입고 금액', '참고', '메모']];
+  for (const m of list) { const isIn = m.type === '입고' || m.type === '입고 취소'; rows.push([m.date, m.type, m.name, m.lot || '', m.exp || '', num(m.qty), isIn && num(m.cost) ? num(m.cost) : '', isIn && num(m.cost) ? num(m.qty) * num(m.cost) : '', m.ref || '', m.memo || '']); }
+  saveXlsx(`입출고내역_${S.ui.hFrom.replace(/-/g, '')}-${S.ui.hTo.replace(/-/g, '')}.xlsx`, [{ name: '입출고 내역', rows, cols: [11, 9, 40, 14, 12, 9, 9, 11, 28, 20] }]);
+}
 function saveXlsx(filename, sheets) {
   if (!window.XLSX) return toast('엑셀 도구를 불러오지 못했어요', 'bad');
   const wb = XLSX.utils.book_new();
@@ -1510,7 +1812,7 @@ document.addEventListener('input', e => {
     if (el.dataset.live != null) renderModal();
     return;
   }
-  if (el.dataset.bind != null) { setPath(S.ui, el.dataset.bind, val); if (el.dataset.bind === 'shopQ') drugSoon('shop'); if (el.dataset.norender == null) schedule(); return; }
+  if (el.dataset.bind != null) { setPath(S.ui, el.dataset.bind, val); if (el.dataset.bind.startsWith('rcv.')) saveRcv(); if (el.dataset.bind === 'shopQ') drugSoon('shop'); if (el.dataset.norender == null) schedule(); return; }
   if (el.dataset.cartqty != null) { setQty(el.dataset.key, el.dataset.cartqty, val); schedule(); return; }
   if (el.dataset.cart != null) { const c = cartOf(el.dataset.key); c[el.dataset.cart] = val; saveCart(el.dataset.key); }
 });
