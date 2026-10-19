@@ -76,7 +76,7 @@ const S = {
     stab: LS.get('stab', '현황'), sq: '', sexp: 180, rcv: LS.get('rcv', null), rcvQ: '', hFrom: thisMonth() + '-01', hTo: today(), hType: '', hq: '', supQ: '',
     exFrom: thisMonth() + '-01', exTo: today(), settleMonth: thisMonth(),
     invMonth: (new Date().getDate() <= 10 ? prevMonth() : thisMonth()), invStatus: '',
-    rqStatus: '대기', rqq: '', drugMore: false, drugTestQ: '타이레놀', setd: null, open: {}, armed: '', lastCreds: null
+    rqStatus: '대기', rqq: '', nt: { to: '', title: '', body: '' }, drugMore: false, drugTestQ: '타이레놀', setd: null, open: {}, armed: '', lastCreds: null
   },
   cart: {}, favs: new Set(LS.get('favs', [])),
   drugOn: null, dq: {}, drugCache: new Map(), drugItems: new Map()
@@ -200,12 +200,125 @@ async function enter(user) {
     }
     subscribeRealtime();
     loadDrugStatus(false);
+    loadPush();
   } catch (e) { console.error(e); S.phase = 'error'; S.err = errMsg(e); }
   render();
+  takeHash();
 }
 async function loadTaxStatus(showErr) {
   try { S.tax = await fn('tax-invoice', { action: 'status' }); schedule(); }
   catch (e) { S.tax = { error: errMsg(e) }; if (showErr) toast(errMsg(e), 'bad'); schedule(); }
+}
+
+/* ---------- 사이트 푸시 알림 ---------- */
+const NOTI_ADMIN = [
+  ['order_new', '새 주문', '거래처가 주문을 넣으면'],
+  ['order_cust_cancel', '거래처 주문 취소', '거래처가 접수 단계에서 주문을 취소하면'],
+  ['req_new', '재고·보유 요청', '거래처가 재고 요청이나 약품 보유 요청을 남기면'],
+  ['stock_low', '품절·재고 부족', '재고 관리 품목이 품절되거나 안전재고 아래로 내려가면']
+];
+const NOTI_CUST = [
+  ['order_confirmed', '주문 확인', '원윤메디팜이 주문을 확인하면'],
+  ['order_shipped', '출고', '주문한 물건이 출고되면'],
+  ['order_delivered', '배송 완료', '배송이 끝나면'],
+  ['order_canceled', '주문 취소', '원윤메디팜이 주문을 취소하면'],
+  ['req_done', '재고 요청 결과', '요청한 품목이 입고되거나 보유가 어려울 때'],
+  ['invoice_issued', '세금계산서 발행', '전자세금계산서가 발행되면'],
+  ['notice', '원윤메디팜 공지', '휴무·배송 일정 같은 안내']
+];
+const EV_LABEL = Object.fromEntries([...NOTI_ADMIN, ...NOTI_CUST].map(([k, l]) => [k, l]));
+const P = { env: '', perm: '', sub: null, subs: [], off: [], loaded: false, busy: false, log: null };
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// ok: 켤 수 있음 · ios: 아이폰 사파리 탭(홈 화면에 추가해야 함) · inapp: 카카오톡 등 앱 안 브라우저 · none: 지원 안 함
+function pushEnv() {
+  if (/KAKAOTALK|NAVER\(inapp|; wv\)|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent)) return 'inapp';
+  const ok = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  if (ok) return 'ok';
+  return isIOS() && !isStandalone() ? 'ios' : 'none';
+}
+let swReg = null;
+async function swReady() {
+  if (!('serviceWorker' in navigator)) return null;
+  try { if (!swReg) swReg = await navigator.serviceWorker.register('sw.js', { scope: './' }); await navigator.serviceWorker.ready; return swReg; }
+  catch (e) { console.warn('sw', e); return null; }
+}
+const b64uBytes = str => { let s = String(str).replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const b = atob(s); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+const sameBytes = (a, b) => { if (!a || !b) return false; const x = new Uint8Array(a), y = new Uint8Array(b); if (x.length !== y.length) return false; for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false; return true; };
+function deviceName() {
+  const ua = navigator.userAgent;
+  const os = /iPhone/.test(ua) ? '아이폰' : /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? '아이패드' : /Android/.test(ua) ? '안드로이드' : /Windows/.test(ua) ? 'Windows PC' : /Mac/.test(ua) ? 'Mac' : /Linux|CrOS/.test(ua) ? '컴퓨터' : '기기';
+  const br = /SamsungBrowser/.test(ua) ? '삼성 인터넷' : /Edg\//.test(ua) ? '엣지' : /Whale/.test(ua) ? '웨일' : /Chrome|CriOS/.test(ua) ? '크롬' : /Firefox|FxiOS/.test(ua) ? '파이어폭스' : /Safari/.test(ua) ? '사파리' : '';
+  return [os, br].filter(Boolean).join(' ') + (isStandalone() ? ' (홈 화면 앱)' : '');
+}
+const thisDevice = () => (P.sub && P.subs.find(x => x.endpoint === P.sub.endpoint)) || null;
+async function loadPush() {
+  P.env = pushEnv(); P.perm = 'Notification' in window ? Notification.permission : '';
+  try {
+    const [subs, pref] = await Promise.all([
+      q(sb.from('push_subs').select('id, endpoint, device, created_at, last_ok_at, fails').order('created_at', { ascending: false })),
+      q(sb.from('notify_prefs').select('off').eq('user_id', S.user.id).maybeSingle())
+    ]);
+    P.subs = subs || []; P.off = pref?.off || [];
+  } catch (e) { console.warn('push', e); }
+  if (P.env === 'ok') { const reg = await swReady(); try { P.sub = reg ? await reg.pushManager.getSubscription() : null; } catch { P.sub = null; } }
+  P.loaded = true; schedule();
+}
+async function loadNotiLog() {
+  try { P.log = await q(sb.from('notifications').select('*').neq('event', 'hook_test').order('created_at', { ascending: false }).limit(40)); }
+  catch (e) { P.log = []; console.warn(e); }
+  schedule();
+}
+// 알림을 눌러 열었을 때(#orders 등) 해당 화면으로
+function applyHash(h) {
+  const k = String(h || '').replace(/^[^#]*#?/, '');
+  if (!k) return false;
+  if (S.phase === 'admin') { if (!NAV.some(n => n[0] === k)) return false; S.view = k; LS.set('view', k); if (k === 'stock') S.ui.stab = '현황'; }
+  else if (S.phase === 'customer') { if (!['shop', 'history', 'reqs', 'invoices', 'me'].includes(k)) return false; S.cview = k; }
+  else return false;
+  render(); window.scrollTo(0, 0); return true;
+}
+function takeHash() { if (location.hash) { applyHash(location.hash); history.replaceState(null, '', location.pathname + location.search); } }
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+  if (e.data?.type !== 'nav') return;
+  applyHash(e.data.url);
+  if (S.phase === 'admin') reload('orders', 'shipments', 'reqs', 'products', 'invoices'); else if (S.phase === 'customer') reload('orders', 'reqs', 'invoices', 'products');
+  if (S.view === 'notify') loadNotiLog();
+});
+async function pushTest(silent = false) {
+  try {
+    const r = await fn('push', { action: 'test', endpoint: P.sub?.endpoint || '' });
+    if (r.sent) toast('테스트 알림을 보냈어요. 몇 초 안에 도착해요', 'ok');
+    else if (!silent) toast(r.devices ? `보내지 못했어요${r.errors?.[0] ? ': ' + r.errors[0] : ''}` : '이 기기는 아직 알림이 꺼져 있어요', 'bad');
+    loadPush();
+  } catch (e) { if (!silent) toast(errMsg(e), 'bad'); }
+}
+const switchBtn = (on, act, attrs, label, dis = false) => `<button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(label)}" data-act="${act}" ${attrs}${dis ? ' disabled' : ''}></button>`;
+// 이 기기 상태 + 켜기/끄기
+function pushStateBlock(forCust) {
+  if (!P.loaded) return `<div class="panel-b"><p class="muted">알림 상태를 확인하고 있어요…</p></div>`;
+  const me = thisDevice();
+  if (P.env === 'inapp') return `<div class="panel-b"><div class="note warn"><b>앱 안에서 열린 화면이라 알림을 켤 수 없어요</b>카카오톡·네이버 같은 앱 안의 브라우저예요. 오른쪽 위 메뉴(⋮ 또는 ···)에서 '다른 브라우저로 열기'를 눌러 크롬(아이폰은 사파리)으로 연 다음 여기서 알림을 켜 주세요.</div></div>`;
+  if (P.env === 'ios') return `<div class="panel-b stack" style="gap:12px"><div class="note info"><b>아이폰은 홈 화면에 추가한 뒤 알림을 켤 수 있어요</b>애플 정책이라 사파리 창에서는 알림을 받을 수 없어요. (iOS 16.4 이상)</div>
+    <ol class="steps"><li>사파리 아래쪽의 <b>공유 버튼</b>(네모에 위쪽 화살표)을 눌러요.</li><li><b>'홈 화면에 추가'</b>를 누르고 추가해요.</li><li>홈 화면에 생긴 <b>원윤메디팜</b> 아이콘으로 열고 로그인해요.</li><li>${forCust ? '내 정보' : '알림 메뉴'}에서 <b>'이 기기에서 알림 켜기'</b>를 눌러요.</li></ol></div>`;
+  if (P.env === 'none') return `<div class="panel-b"><div class="note warn"><b>이 브라우저는 알림을 지원하지 않아요</b>휴대폰은 크롬(안드로이드)이나 사파리(아이폰, 홈 화면에 추가), 컴퓨터는 크롬·엣지에서 열어 주세요.</div></div>`;
+  if (P.perm === 'denied') return `<div class="panel-b stack" style="gap:12px"><div class="note warn"><b>이 브라우저에서 알림이 차단돼 있어요</b>주소창 왼쪽의 자물쇠(또는 사이트 설정) → 알림 → '허용'으로 바꾼 뒤 아래 버튼을 눌러 주세요. 홈 화면 앱은 휴대폰 설정 → 알림에서 원윤메디팜을 허용해 주세요.</div><div class="row"><button class="btn" data-act="pushRecheck">다시 확인</button></div></div>`;
+  if (me) return `<div class="panel-b stack" style="gap:12px"><div class="push-on"><span class="dot" aria-hidden="true"></span><div><b>이 기기에서 알림을 받고 있어요</b><div class="muted" style="font-size:13px">${esc(me.device || deviceName())} · ${fmtD(me.created_at)} 켬</div></div></div>
+    <div class="row"><button class="btn" data-act="pushTest"${P.busy ? ' disabled' : ''}>테스트 알림 보내기</button><button class="btn ghost" data-act="pushOff"${P.busy ? ' disabled' : ''}>이 기기 알림 끄기</button></div></div>`;
+  return `<div class="panel-b stack" style="gap:12px"><p style="margin:0">${forCust ? '이 휴대폰에서 알림을 켜면 주문 확인·출고·배송 완료를 문자 대신 사이트 알림으로 바로 받아요.' : '이 휴대폰에서 알림을 켜면 새 주문·요청이 들어올 때 바로 알림이 와요.'} 알림 허용 창이 뜨면 <b>'허용'</b>을 눌러 주세요.</p>
+    <div class="row"><button class="btn primary" data-act="pushOn"${P.busy ? ' disabled' : ''}>${P.busy ? '켜는 중…' : '이 기기에서 알림 켜기'}</button></div></div>`;
+}
+function pushPrefsBlock(events) {
+  return `<ul class="swl">${events.map(([k, l, d]) => { const on = !P.off.includes(k); return `<li class="swr"><div><div class="t" id="ev-${k}">${esc(l)}</div><div class="s">${esc(d)}</div></div>${switchBtn(on, 'pushPref', `data-k="${k}"`, l)}</li>`; }).join('')}</ul>`;
+}
+function pushDevicesBlock() {
+  if (!P.subs.length) return '';
+  const cur = thisDevice();
+  return `<ul class="list">${P.subs.map(x => `<li class="li"><div class="li-main"><div class="li-t">${esc(x.device || '기기')}${cur && cur.id === x.id ? ' <span class="tag gold">이 기기</span>' : ''}${x.fails ? ` <span class="tag warn">전송 실패 ${x.fails}회</span>` : ''}</div><div class="li-s">${meta(`${fmtD(x.created_at)} 켬`, x.last_ok_at ? `마지막 알림 ${fmtDT(x.last_ok_at)}` : '아직 받은 알림 없음')}</div></div><button class="btn sm ghost" data-act="pushRemove" data-id="${esc(x.id)}">빼기</button></li>`).join('')}</ul>`;
+}
+function pushNudge(forCust) {
+  if (!P.loaded || P.env === 'none' || thisDevice() || P.subs.length || LS.get('pushNudge', '') === 'hide') return '';
+  return `<div class="note info nudge"><div><b>${forCust ? '출고·배송 완료를 휴대폰 알림으로 받아 보세요' : '새 주문을 휴대폰 알림으로 바로 받아 보세요'}</b>${P.env === 'ok' ? '문자 대신 사이트 알림으로 와요.' : P.env === 'ios' ? '아이폰은 홈 화면에 추가한 뒤 켤 수 있어요.' : '크롬이나 사파리에서 열면 켤 수 있어요.'}</div><div class="row">${P.env === 'ok' && P.perm !== 'denied' ? '<button class="btn sm primary" data-act="pushOn">알림 켜기</button>' : `<button class="btn sm" data-act="${forCust ? 'cview' : 'go'}" data-v="${forCust ? 'me' : 'notify'}">방법 보기</button>`}<button class="btn sm ghost" data-act="pushNudgeHide">다음에</button></div></div>`;
 }
 
 /* ---------- 식약처 의약품 정보 ---------- */
@@ -404,13 +517,13 @@ const meta = (...xs) => `<span class="meta">${xs.filter(Boolean).map(x => `<span
 const head = (title, sub = '', actions = '') => `<header class="ph"><div><h1>${title}</h1>${sub ? `<p class="ph-sub">${sub}</p>` : ''}</div>${actions ? `<div class="ph-act">${actions}</div>` : ''}</header>`;
 
 /* ---------- admin ---------- */
-const NAV = [['dash', '현황'], ['orders', '주문 처리'], ['products', '상품·재고'], ['stock', '재고 관리'], ['reqs', '재고 요청'], ['accounts', '거래처'], ['invoices', '세금계산서'], ['settle', '정산·미수'], ['export', '엑셀 내려받기'], ['settings', '설정']];
+const NAV = [['dash', '현황'], ['orders', '주문 처리'], ['products', '상품·재고'], ['stock', '재고 관리'], ['reqs', '재고 요청'], ['accounts', '거래처'], ['invoices', '세금계산서'], ['settle', '정산·미수'], ['export', '엑셀 내려받기'], ['notify', '알림'], ['settings', '설정']];
 function adminView() {
   const all = allOrders();
   const invWait = [...S.invoices.values()].filter(t => t.status === '대기' || t.status === '실패' || t.status === '발행중').length;
   const counts = { orders: all.filter(o => o.status === '접수' || o.status === '확인').length, invoices: invWait, reqs: pendingReqCount(), stock: stockBadCount() };
   const v = NAV.some(n => n[0] === S.view) ? S.view : 'dash';
-  const body = { dash: dashView, orders: ordersView, products: productsView, stock: stockView, reqs: reqsView, accounts: accountsView, invoices: invoicesView, settle: settleView, export: exportView, settings: settingsView }[v]();
+  const body = { dash: dashView, orders: ordersView, products: productsView, stock: stockView, reqs: reqsView, accounts: accountsView, invoices: invoicesView, settle: settleView, export: exportView, notify: notifyView, settings: settingsView }[v]();
   return `<div class="shell"><aside class="side"><div class="side-top">${brand('관리자')}<button class="btn sm m-logout" data-act="logout">로그아웃</button></div><nav class="nav" aria-label="관리 메뉴">${NAV.map(([k, l]) => `<button class="nav-i${v === k ? ' on' : ''}" data-act="go" data-v="${k}"${v === k ? ' aria-current="page"' : ''}>${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('')}</nav><div class="side-foot"><span><b>${esc(S.profile.name || S.profile.login_id)}</b> 관리자</span><button class="linkbtn" data-act="logout">로그아웃</button></div></aside><main class="main">${body}</main></div>`;
 }
 
@@ -435,6 +548,7 @@ function dashView() {
   const setup = setupItems.some(x => !x[0]) ? `<section class="panel"><div class="panel-h"><h2>처음 시작할 때</h2><span class="muted">${setupItems.filter(x => x[0]).length}/${setupItems.length} 완료</span></div><ul class="list">${setupItems.map(([ok, t, v]) => `<li class="li${ok ? '' : ' click'}"${ok ? '' : ` data-act="go" data-v="${v}" role="button" tabindex="0"`}><span class="tag ${ok ? 'ok' : 'warn'}">${ok ? '완료' : '할 일'}</span><div class="li-main" style="white-space:normal">${t}</div></li>`).join('')}</ul></section>` : '';
   return head('오늘의 주문 현황', meta(`${fmtD(today())} 기준`, `상품 ${S.products.size}개`, `거래처 ${S.accounts.size}곳`), `<button class="btn primary" data-act="go" data-v="orders">주문 처리</button>`) + `
   <div class="stack">
+    ${pushNudge(false)}
     <div class="kpis">
       <button class="kpi${nNew.length ? ' alert' : ''}" data-act="goOrders" data-s="접수"><span class="k">확인 대기</span><span class="v">${nNew.length}<small>건</small></span><span class="s">거래처가 새로 넣은 주문</span></button>
       <button class="kpi" data-act="goOrders" data-s="확인"><span class="k">출고 대기</span><span class="v">${nConf.length}<small>건</small></span><span class="s">확인 끝, 출고 전</span></button>
@@ -753,6 +867,29 @@ function exportView() {
   </div>`;
 }
 
+function notifyView() {
+  if (P.log === null) { P.log = []; loadNotiLog(); }
+  const accs = [...S.accounts.values()].filter(a => a.active !== false).sort((a, b) => ko(a.name, b.name));
+  const nt = S.ui.nt; const armed = S.ui.armed === 'notice';
+  const res = r => r.sent_at == null ? '<span class="tag">보내는 중</span>' : r.sent ? `<span class="tag ok tabnum">${r.sent}대 전송</span>` : r.error === '늦어서 보내지 않음' ? '<span class="tag">보내지 않음</span>' : r.failed ? `<span class="tag bad tabnum">실패 ${r.failed}</span>` : '<span class="tag">받을 기기 없음</span>';
+  return head('알림', '새 주문·요청을 휴대폰으로 바로 받고, 거래처에 공지 알림을 보내요. 문자가 아니라 사이트 알림이라 비용이 들지 않아요.', `<button class="btn ghost" data-act="pushRecheck">새로 고침</button>`) + `
+  <div class="stack">
+    <div class="dgrid">
+      <section class="panel"><div class="panel-h"><h2>이 기기</h2></div>${pushStateBlock(false)}${P.subs.length ? `<div class="sec-sub">알림 받는 기기 ${P.subs.length}대</div>${pushDevicesBlock()}` : ''}</section>
+      <section class="panel"><div class="panel-h"><h2>받을 알림</h2></div>${pushPrefsBlock(NOTI_ADMIN)}<p class="hint" style="padding:0 20px 16px;margin:0">끈 알림은 내 모든 기기에서 받지 않아요. 관리자마다 따로 정해요.</p></section>
+    </div>
+    <section class="panel"><div class="panel-h"><h2>거래처에 공지 알림 보내기</h2></div><div class="panel-b"><div class="fgrid">
+      <label class="fld" for="nt-to"><span>받는 거래처</span><select class="inp" id="nt-to" data-bind="nt.to">${opt('', nt.to, `전체 거래처 (${accs.length}곳)`)}${accs.map(a => opt(a.id, nt.to, a.name)).join('')}</select></label>
+      <label class="fld" for="nt-title"><span>제목</span><input class="inp" id="nt-title" data-bind="nt.title" data-norender maxlength="60" value="${esc(nt.title)}" placeholder="예: 10/24(금) 배송 휴무 안내"></label>
+      <label class="fld full" for="nt-body"><span>내용</span><textarea class="inp" id="nt-body" data-bind="nt.body" data-norender maxlength="200" placeholder="예: 창립기념일로 하루 쉬어요. 23일 오후 3시까지 주문하시면 당일 출고해요.">${esc(nt.body)}</textarea></label>
+      <div class="fld full"><div class="row"><button class="btn primary" data-act="sendNotice"${P.busy ? ' disabled' : ''}>${armed ? '한 번 더 누르면 보내요' : '공지 알림 보내기'}</button><span class="hint">알림을 켠 거래처 기기에만 가요. 거래처가 '공지' 알림을 꺼 두었으면 가지 않아요.</span></div></div>
+    </div></div></section>
+    <section class="panel"><div class="panel-h"><h2>최근 알림 기록</h2><button class="btn sm ghost" data-act="notiLog">새로 고침</button></div>
+      ${P.log.length ? `<div class="tbl-wrap" style="border:0;border-radius:0"><table><thead><tr><th>시각</th><th>종류</th><th>받는 쪽</th><th>내용</th><th>결과</th></tr></thead><tbody>${P.log.map(r => `<tr><td class="nowrap tabnum">${fmtDT(r.created_at)}</td><td class="nowrap">${esc(EV_LABEL[r.event] || r.event)}</td><td class="nowrap">${r.audience === 'admin' ? '관리자' : r.audience === 'account' ? esc(S.accounts.get(r.account_id)?.name || '거래처') : '개인'}</td><td><div class="t">${esc(r.title)}</div><div class="s">${esc(r.body)}</div></td><td class="nowrap">${res(r)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty"><b>아직 보낸 알림이 없어요</b>주문·요청이 들어오거나 상태가 바뀌면 여기에 쌓여요.</div>`}
+    </section>
+  </div>`;
+}
+
 function settingsView() {
   if (!S.ui.setd) S.ui.setd = { name: '원윤메디팜', biz_no: '', ceo: '', tel: '', fax: '', addr: '', bank: '', biz_type: '', biz_item: '', tax_email: '', tax_manager: '', cutoff: '', notice: '', vat_included: true, ...S.settings };
   const d = S.ui.setd;
@@ -842,6 +979,7 @@ function shopView(ctx) {
   const reqCta = `<button class="btn sm" data-act="reqNew">${isDrug ? '약품' : '품목'} 보유 요청</button>`;
   return `<div class="shop">
     <div class="stack" style="gap:12px;min-width:0">
+      ${pushNudge(true)}
       ${arrived.length ? `<div class="note ok"><b>재고 요청하신 품목이 입고됐어요</b>${esc(arrived[0].name)}${arrived.length > 1 ? ` 외 ${arrived.length - 1}건` : ''} <button class="btn sm" data-act="cview" data-v="reqs">확인하기</button></div>` : ''}
       ${last ? `<div class="again">${meta(`최근 주문 <b class="mono">${esc(last.no)}</b>`, fmtD(last.created_at), `${(last.lines || []).length}품목${custPrices() ? ` ${won(last.total)}원` : ''}`)}<button class="btn sm" data-act="reorder" data-id="${esc(last.id)}">그대로 다시 담기</button></div>` : ''}
       ${kinds.length > 1 ? `<div class="ktabs" role="tablist" aria-label="품목 구분" style="grid-template-columns:repeat(${kinds.length},minmax(0,1fr))">${kinds.map(k => { const n = act.filter(p => kindOf(p) === k).length; const c = inCart(k); return `<button role="tab" aria-selected="${k === kind}" class="${k === kind ? 'on' : ''}" data-act="shopKind" data-k="${esc(k)}"><span class="kt-l">${esc(k)}</span><span class="kt-c">${n}개 품목</span>${c ? `<span class="kt-b">${c}개 담음</span>` : ''}</button>`; }).join('')}</div>` : ''}
@@ -910,6 +1048,7 @@ function meView() {
     <section class="panel"><div class="panel-h"><h2>거래처 정보</h2></div><div class="panel-b"><div class="kv">
       <div><span>상호</span><b>${esc(a.name)}</b></div><div><span>요양기관기호</span><b class="mono">${esc(a.ykiho || '-')}</b></div><div><span>사업자등록번호</span><b class="mono">${esc(bizFmt(a.biz_no) || '-')}</b></div><div><span>대표자</span><b>${esc(a.ceo || '-')}</b></div><div><span>세금계산서 이메일</span><b>${esc(a.tax_email || '-')}</b></div><div><span>배송 주소</span><b>${esc(a.addr || '-')}</b></div><div><span>결제 조건</span><b>${esc(a.pay_terms || '-')}</b></div><div><span>로그인 아이디</span><b class="mono">${esc(S.profile.login_id)}</b></div>
     </div><p class="hint" style="margin-top:12px">정보가 바뀌었으면 원윤메디팜${S.settings.tel ? `(${esc(S.settings.tel)})` : ''}에 알려 주세요.${S.settings.bank ? ` 입금 계좌: ${esc(S.settings.bank)}` : ''}</p></div></section>
+    <section class="panel" id="push-panel"><div class="panel-h"><h2>알림</h2></div>${pushStateBlock(true)}<div class="sec-sub">받을 알림</div>${pushPrefsBlock(NOTI_CUST)}${P.subs.length ? `<div class="sec-sub">알림 받는 기기</div>${pushDevicesBlock()}` : ''}</section>
     <section class="panel"><div class="panel-h"><h2>비밀번호 변경</h2></div><div class="panel-b"><form class="fgrid" data-form="mypw" novalidate>
       <label class="fld" for="mp-1"><span>새 비밀번호 (8자 이상)</span><input class="inp" id="mp-1" type="password" data-bind="np.a" data-norender autocomplete="new-password"></label>
       <label class="fld" for="mp-2"><span>새 비밀번호 확인</span><input class="inp" id="mp-2" type="password" data-bind="np.b" data-norender autocomplete="new-password"></label>
@@ -1212,7 +1351,7 @@ async function saveCostRow(pid, d) {
 function openWindow() { try { return window.open('about:blank', '_blank'); } catch { return null; } }
 
 const A = {
-  go(d) { S.view = d.v; LS.set('view', d.v); if (d.v === 'settings') { S.ui.setd = null; loadTaxStatus(false); } S.ui.armed = ''; render(); window.scrollTo(0, 0); },
+  go(d) { S.view = d.v; LS.set('view', d.v); if (d.v === 'settings') { S.ui.setd = null; loadTaxStatus(false); } if (d.v === 'notify') { loadNotiLog(); loadPush(); } S.ui.armed = ''; render(); window.scrollTo(0, 0); },
   goOrders(d) { S.ui.ostatus = d.s; A.go({ v: 'orders' }); },
   goInvoices(d) { S.ui.invMonth = d.m; A.go({ v: 'invoices' }); },
   ostatus(d) { S.ui.ostatus = d.s; render(); },
@@ -1267,6 +1406,59 @@ const A = {
     Object.assign(M.draft, { name: x.name, spec: String(x.strength || '').slice(0, 60), maker: x.company || '', code: (x.edi || [])[0] || '' }); renderModal();
   },
   shopChip(d) { S.ui.shopChip = d.c; render(); },
+  async pushOn() {
+    if (P.busy) return;
+    if (P.env !== 'ok') { if (S.phase === 'customer') { S.cview = 'me'; render(); setTimeout(() => document.getElementById('push-panel')?.scrollIntoView({ block: 'start' }), 0); } else { S.view = 'notify'; render(); } return; }
+    P.busy = true; schedule();
+    try {
+      const perm = await Notification.requestPermission(); P.perm = perm;
+      if (perm !== 'granted') throw fail(perm === 'denied' ? '알림이 차단돼 있어요. 브라우저의 사이트 설정에서 알림을 허용해 주세요.' : "알림 허용 창에서 '허용'을 눌러야 켤 수 있어요");
+      const reg = await swReady(); if (!reg) throw fail('알림 기능을 준비하지 못했어요. 새로 고친 뒤 다시 눌러 주세요.');
+      const { publicKey } = await fn('push', { action: 'key' }); if (!publicKey) throw fail('알림 키를 받지 못했어요');
+      const appKey = b64uBytes(publicKey);
+      let sub = await reg.pushManager.getSubscription();
+      if (sub && !sameBytes(sub.options?.applicationServerKey, appKey)) { await sub.unsubscribe().catch(() => {}); sub = null; }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey });
+      const j = sub.toJSON();
+      await rpc('save_push_sub', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_device: deviceName() });
+      P.sub = sub; LS.set('pushNudge', 'hide');
+      await loadPush();
+      toast('이 기기에서 알림을 받아요', 'ok');
+      pushTest(true);
+    } catch (e) { console.warn(e); toast(errMsg(e), 'bad'); }
+    finally { P.busy = false; schedule(); }
+  },
+  async pushOff() {
+    if (P.busy) return; P.busy = true; schedule();
+    try { const me = thisDevice(); if (me) await q(sb.from('push_subs').delete().eq('id', me.id)); if (P.sub) await P.sub.unsubscribe().catch(() => {}); P.sub = null; await loadPush(); toast('이 기기 알림을 껐어요'); }
+    catch (e) { toast(errMsg(e), 'bad'); }
+    finally { P.busy = false; schedule(); }
+  },
+  async pushRemove(d) {
+    try { await q(sb.from('push_subs').delete().eq('id', d.id)); const me = thisDevice(); if (me && me.id === d.id && P.sub) { await P.sub.unsubscribe().catch(() => {}); P.sub = null; } await loadPush(); toast('그 기기로는 알림을 보내지 않아요'); }
+    catch (e) { toast(errMsg(e), 'bad'); }
+  },
+  pushTest() { pushTest(false); },
+  pushRecheck() { loadPush(); if (S.view === 'notify') loadNotiLog(); },
+  pushNudgeHide() { LS.set('pushNudge', 'hide'); render(); },
+  async pushPref(d) {
+    const off = new Set(P.off); off.has(d.k) ? off.delete(d.k) : off.add(d.k); P.off = [...off]; render();
+    try { await q(sb.from('notify_prefs').upsert({ user_id: S.user.id, off: P.off, updated_at: new Date().toISOString() })); }
+    catch (e) { toast(errMsg(e), 'bad'); loadPush(); }
+  },
+  notiLog() { loadNotiLog(); },
+  async sendNotice() {
+    const nt = S.ui.nt; const title = String(nt.title || '').trim();
+    if (title.length < 2) { S.ui.armed = ''; render(); return toast('제목을 2자 이상 적어 주세요', 'bad'); }
+    if (S.ui.armed !== 'notice') { S.ui.armed = 'notice'; render(); return; }
+    S.ui.armed = ''; P.busy = true; render();
+    try {
+      const r = await fn('push', { action: 'broadcast', title, body: String(nt.body || '').trim(), accounts: nt.to ? [nt.to] : [] });
+      toast(r.sent ? `${r.accounts}곳에 보냈어요 · 기기 ${r.sent}대에 도착` : `${r.accounts}곳에 보냈지만 알림을 켠 기기가 없어요`, r.sent ? 'ok' : '');
+      S.ui.nt = { to: nt.to, title: '', body: '' }; loadNotiLog();
+    } catch (e) { toast(errMsg(e), 'bad'); }
+    finally { P.busy = false; render(); }
+  },
   pkind(d) { S.ui.pkind = d.k || ''; S.ui.pgroup = ''; render(); },
   shopKind(d) {
     if (!KINDS.includes(d.k) || S.ui.shopKind === d.k) return;
@@ -1841,7 +2033,7 @@ document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]'); if (!t) return;
   const f = A[t.dataset.act]; if (!f) return;
   if (t.tagName === 'A') e.preventDefault();
-  if (S.ui.armed && !['delPayment', 'custCancel', 'cancelReq'].includes(t.dataset.act)) S.ui.armed = '';
+  if (S.ui.armed && !['delPayment', 'custCancel', 'cancelReq', 'sendNotice'].includes(t.dataset.act)) S.ui.armed = '';
   if (M.armed && t.dataset.act !== 'arm') M.armed = '';
   f(t.dataset, t, e);
 });

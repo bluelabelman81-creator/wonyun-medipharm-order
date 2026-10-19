@@ -10,6 +10,11 @@
 <link rel="icon" type="image/svg+xml" href="assets/mark.svg">
 <link rel="icon" type="image/png" href="assets/mark-64.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="원윤메디팜">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preload" href="assets/fonts/Paperlogy-6SemiBold.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
@@ -231,6 +236,22 @@ td .s{font-size:12.5px;color:var(--ink-3)}
 /* shop — 거래처 주문 */
 .shop{display:grid;grid-template-columns:minmax(0,1fr) 352px;gap:28px;align-items:start}
 .shop-tools{display:grid;gap:14px}
+.note.nudge{justify-content:space-between;gap:10px 16px;padding:14px 18px}
+.note.nudge>div:first-child{display:grid;gap:2px}
+.steps{margin:0;padding-left:20px;display:grid;gap:8px;font-size:14px;color:var(--ink-2)}
+.push-on{display:flex;gap:12px;align-items:flex-start}
+.push-on .dot{flex:0 0 auto;width:10px;height:10px;margin-top:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--ok-soft)}
+.sec-sub{padding:11px 20px 9px;font-size:12.5px;font-weight:600;color:var(--ink-3);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);background:var(--sunken)}
+.swl{list-style:none;margin:0;padding:0}
+.swr{display:flex;align-items:center;gap:16px;padding:13px 20px;border-bottom:1px solid var(--rule)}
+.swr:last-child{border-bottom:0}
+.swr .t{font-weight:600;font-size:14.5px;color:var(--ink)}
+.swr .s{margin-top:2px;font-size:13px;color:var(--ink-3)}
+.switch{position:relative;flex:0 0 auto;margin-left:auto;width:46px;height:28px;padding:0;border-radius:999px;border:1px solid var(--rule-2);background:var(--sunken);cursor:pointer;transition:background .15s,border-color .15s}
+.switch::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--sheet);box-shadow:0 1px 3px rgba(36,32,26,.25);transition:transform .15s}
+.switch[aria-checked="true"]{background:var(--gold);border-color:var(--gold)}
+.switch[aria-checked="true"]::after{transform:translateX(18px)}
+@media (prefers-reduced-motion:reduce){.switch,.switch::after{transition:none}}
 .ktabs{display:grid;border:1px solid var(--rule-2);border-radius:6px;overflow:hidden;background:var(--sheet)}
 .ktabs button{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;min-width:0;padding:15px 20px;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;color:var(--ink-2);transition:background .15s}
 .ktabs button+button{border-left:1px solid var(--rule-2)}
@@ -478,6 +499,6 @@ tr.grp-row td span{margin-left:6px;font-family:var(--f-sans);font-size:12.5px;fo
 <noscript><p style="padding:24px">자바스크립트를 켜야 주문 사이트를 쓸 수 있어요.</p></noscript>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
